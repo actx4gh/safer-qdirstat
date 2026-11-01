@@ -13,14 +13,17 @@ Fixes carried on top of upstream `master`:
   future selection, locate windows). Rows that are not highlighted are never
   part of a range.
 - **Destructive cleanups refuse the scan root.** `CleanupCollection::execute()`
-  rejects any item whose parent is the tree root and reports it instead of
-  running the command.
+  and Move to Trash refuse to run on the top level item (the scan root) when
+  the cleanup removes or replaces it, or when it is part of a multi-item
+  selection, and say so instead of running the command. A single-item
+  `RefreshThis` cleanup on the scan root (Clear Directory Contents) and
+  non-modifying cleanups are unaffected.
 - **Confirmation lists every directory.** For a mixed file/directory selection
   the dialog shows all directories untruncated, directories first, with No as
   the default button. The 7-entry cap applies to files only.
 
-Status: the Shift anchor fix has landed with its tests; the other two are in
-progress.
+Status: the Shift anchor fix and the scan root guard have landed with their
+tests; the confirmation dialog change is in progress.
 
 Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
 patches as one commit per fix and is rebased onto upstream periodically.
