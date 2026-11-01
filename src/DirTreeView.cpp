@@ -9,6 +9,10 @@
 
 #include <QMenu>
 #include <QKeyEvent>
+#include <QMouseEvent>
+#include <QHeaderView>
+#include <QStyle>
+#include <QStyleOption>
 
 #include "DirTreeView.h"
 #include "DirTreeModel.h"
@@ -28,7 +32,9 @@ using namespace QDirStat;
 
 DirTreeView::DirTreeView( QWidget * parent ):
     QTreeView( parent ),
-    _cleanupCollection(0)
+    _cleanupCollection(0),
+    _extendingRange( false ),
+    _shiftRangePressed( false )
 {
     _percentBarDelegate = new DirTreePercentBarDelegate( this, PercentBarCol );
     CHECK_NEW( _percentBarDelegate );
@@ -64,6 +70,15 @@ void DirTreeView::currentChanged( const QModelIndex & current,
 {
     // logDebug() << "Setting new current to " << current << endl;
     QTreeView::currentChanged( current, oldCurrent );
+
+    // Every current change that is not this view's own Shift extension moves
+    // the Shift anchor: a tree click, a treemap click, a refresh, a locate
+    // window, a breadcrumb. This replaces QAbstractItemView's private anchor
+    // which is updated by none of the programmatic ones.
+
+    if ( ! _extendingRange )
+        _rangeAnchor = current;
+
     scrollTo( current );
 }
 
@@ -247,52 +262,364 @@ void DirTreeView::setExpanded( FileInfo * item, bool expanded )
 
 void DirTreeView::mousePressEvent( QMouseEvent * event )
 {
-    if ( event )
+    if ( ! event )
+        return;
+
+    _shiftRangePressed = false;
+
+    switch ( event->button() )
     {
-        switch ( event->button() )
-        {
-            // Leave the the back / forward buttons on the mouse to act like the
-            // history back / forward buttons in the tool bar.
-            //
-            // By default, the QTreeView parent class uses them to act as
-            // cursor up / cursor down in the tree which defeats the idea of
-            // using them as history consistently throughout the application,
-            // making those mouse buttons pretty much unusable.
-            //
-            // So this makes sure those events are immediately propagated up to
-            // the parent widget.
+        // Leave the the back / forward buttons on the mouse to act like the
+        // history back / forward buttons in the tool bar.
+        //
+        // By default, the QTreeView parent class uses them to act as
+        // cursor up / cursor down in the tree which defeats the idea of
+        // using them as history consistently throughout the application,
+        // making those mouse buttons pretty much unusable.
+        //
+        // So this makes sure those events are immediately propagated up to
+        // the parent widget.
 
-            case Qt::BackButton:
-            case Qt::ForwardButton:
-                event->ignore();
-                break;
+        case Qt::BackButton:
+        case Qt::ForwardButton:
+            event->ignore();
+            return;
 
-            default:
-                QTreeView::mousePressEvent( event );
-                break;
-        }
+        case Qt::LeftButton:
+            if ( isShiftRangePress( event ) )
+            {
+                QModelIndex target = indexAt( event->position().toPoint() );
+
+                if ( extendRangeTo( target ) )
+                {
+                    // Not calling QTreeView::mousePressEvent(): it would
+                    // build the range from Qt's private anchor.
+
+                    _shiftRangePressed = true;
+                    _shiftPressIndex   = target;
+                    event->accept();
+                    return;
+                }
+            }
+            break;
+
+        default:
+            break;
     }
+
+    QTreeView::mousePressEvent( event );
+}
+
+
+void DirTreeView::mouseMoveEvent( QMouseEvent * event )
+{
+    if ( ! event )
+        return;
+
+    if ( _shiftRangePressed )
+    {
+        if ( event->buttons() & Qt::LeftButton )
+        {
+            // Continuation of a Shift + click that this view handled: keep
+            // extending the same range to the row under the pointer.
+            //
+            // QTreeView must not see this event: it would start a drag
+            // selection from its own private press position, which is only
+            // updated by non-Shift presses, i.e. the same stale anchor in
+            // pixel form. Auto-scrolling at the viewport edges is not
+            // available during this gesture.
+
+            QModelIndex target = indexAt( event->position().toPoint() );
+
+            if ( target.isValid() && ! sameRow( target, currentIndex() ) )
+                extendRangeTo( target );
+
+            event->accept();
+            return;
+        }
+
+        _shiftRangePressed = false;     // button already up: gesture is over
+    }
+
+    QTreeView::mouseMoveEvent( event );
+}
+
+
+void DirTreeView::mouseReleaseEvent( QMouseEvent * event )
+{
+    if ( ! event )
+        return;
+
+    if ( _shiftRangePressed && event->button() == Qt::LeftButton )
+    {
+        _shiftRangePressed = false;
+
+        // QAbstractItemView emits clicked() on release over the pressed
+        // item; do the same so observers (e.g. MainWindow::itemClicked())
+        // see no difference.
+
+        QModelIndex index = indexAt( event->position().toPoint() );
+
+        if ( index.isValid() && index == _shiftPressIndex )
+            emit clicked( index );
+
+        _shiftPressIndex = QPersistentModelIndex();
+        event->accept();
+        return;
+    }
+
+    QTreeView::mouseReleaseEvent( event );
 }
 
 
 void DirTreeView::keyPressEvent( QKeyEvent * event )
 {
-    if ( event )
+    if ( ! event )
+        return;
+
+    switch ( event->key() )
     {
+        case Qt::Key_Asterisk:
+            // By default, this opens all tree branches which completely
+            // kills our performance, negating all our lazy sorting in
+            // each branch in the DirTreeModel / DirInfo classes.
+            //
+            // So let's just ignore this key; we have better alternatives
+            // with "Tree" -> "Expand to Level" -> "Level 0" .. "Level 5".
+            return;
+
+        default:
+            break;
+    }
+
+    if ( isShiftRangeKey( event ) )
+    {
+        CursorAction action = MoveDown;
+
         switch ( event->key() )
         {
-            case Qt::Key_Asterisk:
-                // By default, this opens all tree branches which completely
-                // kills our performance, negating all our lazy sorting in
-                // each branch in the DirTreeModel / DirInfo classes.
-                //
-                // So let's just ignore this key; we have better alternatives
-                // with "Tree" -> "Expand to Level" -> "Level 0" .. "Level 5".
-                return;
-
-            default:
-                QTreeView::keyPressEvent( event );
-                break;
+            case Qt::Key_Up:       action = MoveUp;       break;
+            case Qt::Key_Down:     action = MoveDown;     break;
+            case Qt::Key_PageUp:   action = MovePageUp;   break;
+            case Qt::Key_PageDown: action = MovePageDown; break;
+            case Qt::Key_Home:     action = MoveHome;     break;
+            case Qt::Key_End:      action = MoveEnd;      break;
+            case Qt::Key_Left:     action = MoveLeft;     break;
+            case Qt::Key_Right:    action = MoveRight;    break;
+            default:                                      break;
         }
+
+        // QTreeView::moveCursor() has side effects for MoveLeft / MoveRight
+        // (collapse / expand the current item); in that case it returns the
+        // unchanged current index, and like QAbstractItemView::keyPressEvent()
+        // this then changes no selection.
+
+        QModelIndex oldCurrent = currentIndex();
+        QModelIndex target     = moveCursor( action, event->modifiers() );
+
+        if ( target.isValid() && target != oldCurrent )
+            extendRangeTo( target );
+
+        event->accept();
+        return;
     }
+
+    QTreeView::keyPressEvent( event );
+}
+
+
+QModelIndex DirTreeView::rangeAnchor() const
+{
+    // The anchor becomes invalid after a model reset or when its row was
+    // removed, and visualRect() is empty when an ancestor of it was collapsed
+    // after it became current. In both cases fall back to the current item,
+    // which is what shows the focus outline.
+    //
+    // Visibility is judged in the tree column so that a hidden column of the
+    // stored index is not mistaken for a collapsed branch.
+
+    const int   col    = treeColumn();
+    QModelIndex anchor = _rangeAnchor;
+
+    if ( anchor.isValid() )
+        anchor = anchor.sibling( anchor.row(), col );
+
+    if ( ! anchor.isValid() || visualRect( anchor ).isEmpty() )
+    {
+        anchor = currentIndex();
+
+        if ( anchor.isValid() )
+            anchor = anchor.sibling( anchor.row(), col );
+    }
+
+    if ( ! anchor.isValid() || visualRect( anchor ).isEmpty() )
+        return QModelIndex();   // current item not visible either
+
+    return anchor;
+}
+
+
+bool DirTreeView::extendRangeTo( const QModelIndex & target )
+{
+    if ( ! selectionModel() || ! target.isValid() )
+        return false;
+
+    QModelIndex anchor = rangeAnchor();
+
+    _extendingRange = true;     // keep currentChanged() from moving the anchor
+
+    if ( anchor.isValid() )
+    {
+        selectionModel()->setCurrentIndex( target, QItemSelectionModel::NoUpdate );
+
+        // The rect only needs to span the two rows; take both points from the
+        // target's column so a hidden column of the anchor cannot interfere.
+        // QTreeView::setSelection() maps points above or below the viewport
+        // to the correct rows in both scroll modes.
+
+        QModelIndex anchorRow = anchor.sibling( anchor.row(), target.column() );
+
+        if ( ! anchorRow.isValid() )
+            anchorRow = anchor;
+
+        QRect anchorRect = visualRect( anchorRow );
+        QRect targetRect = visualRect( target );
+        QRect rect( QPoint( targetRect.center().x(), anchorRect.center().y() ),
+                    targetRect.center() );
+
+        // SelectCurrent replaces the range that is being extended and keeps
+        // ranges committed earlier (e.g. by Ctrl + clicks), just like
+        // QAbstractItemView does with its own anchor.
+
+        setSelection( rect, QItemSelectionModel::SelectCurrent | QItemSelectionModel::Rows );
+    }
+    else
+    {
+        // No usable anchor: a plain click. Never fall back to QTreeView
+        // here; it would use Qt's private anchor.
+
+        selectionModel()->setCurrentIndex( target,
+                                           QItemSelectionModel::ClearAndSelect
+                                           | QItemSelectionModel::Rows );
+    }
+
+    _extendingRange = false;
+
+    return true;
+}
+
+
+bool DirTreeView::isShiftRangePress( const QMouseEvent * event ) const
+{
+    if ( selectionMode() != ExtendedSelection )
+        return false;
+
+    if ( event->button() != Qt::LeftButton ||
+         ! ( event->modifiers() & Qt::ShiftModifier ) )
+    {
+        return false;
+    }
+
+    QPoint      pos   = event->position().toPoint();
+    QModelIndex index = indexAt( pos );
+
+    if ( ! index.isValid() )
+        return false;   // Shift + click on empty space: QTreeView ignores it
+
+    if ( isOnBranchIndicator( pos, index ) )
+        return false;   // keep QTreeView's expand / collapse on the indicator
+
+    return true;
+}
+
+
+bool DirTreeView::isShiftRangeKey( const QKeyEvent * event ) const
+{
+    if ( selectionMode() != ExtendedSelection )
+        return false;
+
+    Qt::KeyboardModifiers mods = event->modifiers();
+
+    if ( ! ( mods & Qt::ShiftModifier ) || ( mods & Qt::ControlModifier ) )
+    {
+        // Ctrl + Shift + navigation: QTreeView moves the current item
+        // without changing the selection; currentChanged() then moves the
+        // anchor along, which is also what Qt does with its own anchor.
+
+        return false;
+    }
+
+    switch ( event->key() )
+    {
+        case Qt::Key_Up:
+        case Qt::Key_Down:
+        case Qt::Key_PageUp:
+        case Qt::Key_PageDown:
+        case Qt::Key_Home:
+        case Qt::Key_End:
+        case Qt::Key_Left:
+        case Qt::Key_Right:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+
+int DirTreeView::treeColumn() const
+{
+    // The tree (indentation, branch indicators) is drawn in the column
+    // treePosition() names; -1 means the first visible column, whatever its
+    // logical index (the user can reorder columns).
+
+    return treePosition() >= 0 ? treePosition() : header()->logicalIndex( 0 );
+}
+
+
+bool DirTreeView::isOnBranchIndicator( const QPoint & pos, const QModelIndex & index ) const
+{
+    // This mirrors QTreeViewPrivate::itemDecorationAt(): the indicator is an
+    // indentation()-wide strip directly before the tree column's item rect,
+    // only for items that have children (and not for toplevel items if
+    // rootIsDecorated() is off), possibly adjusted by the style.
+
+    int col = treeColumn();
+
+    if ( header()->logicalIndexAt( pos.x() ) != col )
+        return false;
+
+    QModelIndex treeIndex = index.sibling( index.row(), col );
+
+    if ( ! treeIndex.isValid() || ! model()->hasChildren( treeIndex ) )
+        return false;
+
+    if ( ! rootIsDecorated() && ! treeIndex.parent().isValid() )
+        return false;
+
+    QRect itemRect = visualRect( treeIndex );
+
+    if ( itemRect.isEmpty() )
+        return false;
+
+    QRect strip;
+
+    if ( isRightToLeft() )
+        strip = QRect( itemRect.right() + 1, itemRect.top(), indentation(), itemRect.height() );
+    else
+        strip = QRect( itemRect.left() - indentation(), itemRect.top(), indentation(), itemRect.height() );
+
+    QStyleOption opt;
+    opt.initFrom( this );
+    opt.rect = strip;
+    strip = style()->subElementRect( QStyle::SE_TreeViewDisclosureItem, &opt, this );
+
+    return strip.contains( pos );
+}
+
+
+bool DirTreeView::sameRow( const QModelIndex & a, const QModelIndex & b )
+{
+    return a.isValid() && b.isValid() &&
+        a.row() == b.row() && a.parent() == b.parent();
 }

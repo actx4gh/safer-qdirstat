@@ -11,6 +11,7 @@
 
 
 #include <QTreeView>
+#include <QPersistentModelIndex>
 
 class QAction;
 
@@ -126,12 +127,19 @@ namespace QDirStat
 	 * Change the current item. Overwritten from QTreeView to make sure
 	 * the branch of the new current item is expanded and scrolled to
 	 * the visible area.
+         *
+         * This also moves the anchor for Shift ranges (see below) unless
+         * the change was caused by this view's own Shift extension.
 	 **/
 	virtual void currentChanged( const QModelIndex & current,
 				     const QModelIndex & oldCurrent ) Q_DECL_OVERRIDE;
 
         /**
          * Keyboard event handler.
+         *
+         * Shift + Up / Down / PageUp / PageDown / Home / End / Left / Right
+         * extend the selection from this view's own anchor (see below).
+         * Everything else is left to QTreeView.
          *
          * Reimplemented from QTreeView.
          **/
@@ -144,10 +152,102 @@ namespace QDirStat
          * forward buttons; we want consistent history buttons throughout the
          * application.
          *
+         * A Shift + left click is handled here as well: it selects the row
+         * range from this view's own anchor to the clicked row (see below).
+         *
          * Reimplemented from QTreeView.
          **/
         virtual void mousePressEvent( QMouseEvent * event ) Q_DECL_OVERRIDE;
 
+        /**
+         * Mouse move handler: a Shift + left click that this view handled
+         * keeps extending the same range while the button is held down.
+         *
+         * Reimplemented from QTreeView.
+         **/
+        virtual void mouseMoveEvent( QMouseEvent * event ) Q_DECL_OVERRIDE;
+
+        /**
+         * Mouse release handler: ends a Shift range gesture started in
+         * mousePressEvent().
+         *
+         * Reimplemented from QTreeView.
+         **/
+        virtual void mouseReleaseEvent( QMouseEvent * event ) Q_DECL_OVERRIDE;
+
+
+    private:
+
+        //
+        // Shift range anchor
+        //
+        // QAbstractItemView keeps a private anchor for Shift ranges that is
+        // only updated by its own mouse and keyboard handling. QDirStat moves
+        // the current item through the shared SelectionModel (treemap clicks,
+        // refresh, "future selection", locate windows, breadcrumbs), which
+        // never updates that anchor. Depending on the Qt version it is either
+        // never re-synced (Qt < 6.8) or re-synced only when no Shift key is
+        // reported at that instant (Qt >= 6.8). A Shift-click could then
+        // extend from a row that was made current long ago and is scrolled out
+        // of view, selecting every expanded row in between.
+        //
+        // So this view keeps its own anchor: the item that was last made
+        // current by any means except this view's own Shift extension, i.e.
+        // the item that shows the focus outline. All Shift gestures (click,
+        // click-and-drag, navigation keys) build their range from it. Qt's
+        // private anchor is never consulted for them.
+        //
+        // See https://github.com/shundhammer/qdirstat/issues/329
+        //
+
+        /**
+         * Return the anchor for a Shift range: _rangeAnchor if it is still
+         * valid and visible (not below a collapsed branch), otherwise the
+         * current item if that is visible, otherwise an invalid index.
+         **/
+        QModelIndex rangeAnchor() const;
+
+        /**
+         * Make 'target' the current item and select the row range from the
+         * anchor to it. Without a usable anchor this degrades to a plain
+         * single selection of 'target'. Return 'false' if nothing was done.
+         **/
+        bool extendRangeTo( const QModelIndex & target );
+
+        /**
+         * Return 'true' if 'event' is a Shift + left button press on an item
+         * that this view should handle as a range extension.
+         **/
+        bool isShiftRangePress( const QMouseEvent * event ) const;
+
+        /**
+         * Return 'true' if 'event' is a Shift + navigation key that this view
+         * should handle as a range extension.
+         **/
+        bool isShiftRangeKey( const QKeyEvent * event ) const;
+
+        /**
+         * Return the logical index of the column that shows the tree
+         * (indentation and branch indicators).
+         **/
+        int treeColumn() const;
+
+        /**
+         * Return 'true' if 'pos' is on the branch indicator of 'index', i.e.
+         * in the area where a click expands or collapses the item. This
+         * mirrors what QTreeView checks before it handles a click as a
+         * selection click.
+         **/
+        bool isOnBranchIndicator( const QPoint & pos, const QModelIndex & index ) const;
+
+        /**
+         * Return 'true' if both indexes are in the same row (same parent,
+         * same row number); the column is ignored.
+         **/
+        static bool sameRow( const QModelIndex & a, const QModelIndex & b );
+
+
+    protected:
 
 	// Data members
 
@@ -155,6 +255,11 @@ namespace QDirStat
         SizeColDelegate *           _sizeColDelegate;
 	HeaderTweaker *             _headerTweaker;
 	CleanupCollection *         _cleanupCollection;
+
+        QPersistentModelIndex       _rangeAnchor;       // see "Shift range anchor" above
+        QPersistentModelIndex       _shiftPressIndex;   // item of the Shift + click being handled
+        bool                        _extendingRange;    // true only inside extendRangeTo()
+        bool                        _shiftRangePressed; // left button still down after a handled Shift + click
 
     };	// class DirTreeView
 
