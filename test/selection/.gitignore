@@ -1,0 +1,7 @@
+Makefile
+.qmake.stash
+.obj/
+.moc/
+.ui/
+.rcc/
+test-selection

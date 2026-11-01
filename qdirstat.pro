@@ -28,6 +28,9 @@ CONFIG  += ordered
 
 SUBDIRS  = src scripts doc doc/stats man
 
+# QTest regression tests (safer-qdirstat); run with 'make check'
+SUBDIRS += test/selection
+
 # Not used by default
 #
 # SUBDIRS += metainfo
