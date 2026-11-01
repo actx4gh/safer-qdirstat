@@ -1,4 +1,35 @@
-# QDirStat
+# safer-qdirstat
+
+A fork of [QDirStat](https://github.com/shundhammer/qdirstat) carrying a small
+set of selection-safety patches. Everything else is upstream, unchanged.
+
+Fixes carried on top of upstream `master`:
+
+- **Shift ranges anchor on the visible current item.** `DirTreeView` keeps
+  its own anchor, the item last made current by any means, and builds
+  Shift+click, Shift+drag and Shift+arrow ranges from it instead of from
+  `QAbstractItemView`'s private anchor, which is not updated when the current
+  item changes through the shared selection model (treemap clicks, refresh,
+  future selection, locate windows). Rows that are not highlighted are never
+  part of a range.
+- **Destructive cleanups refuse the scan root.** `CleanupCollection::execute()`
+  rejects any item whose parent is the tree root and reports it instead of
+  running the command.
+- **Confirmation lists every directory.** For a mixed file/directory selection
+  the dialog shows all directories untruncated, directories first, with No as
+  the default button. The 7-entry cap applies to files only.
+
+Status: the Shift anchor fix has landed with its tests; the other two are in
+progress.
+
+Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
+patches as one commit per fix and is rebased onto upstream periodically.
+Regression tests live in `test/selection` (QTest, Qt 6, run with
+`QT_QPA_PLATFORM=offscreen make check`); `test/selection/RESULTS.md` records
+the runs against `master` and `safer`.
+
+Background: shundhammer/qdirstat#329.
+
 <img src="https://github.com/shundhammer/qdirstat/blob/master/src/icons/qdirstat.svg" height="64">
 
 Qt-based directory statistics: KDirStat without any KDE -- from the author of
