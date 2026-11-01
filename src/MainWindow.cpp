@@ -1153,7 +1153,24 @@ void MainWindow::moveToTrash()
     // _ui->actionMoveToTrash() is not a subclass of Cleanup and not owned by
     // CleanupCollection, so this has to replicate some of its functionality.
 
-    FileInfoSet selectedItems = app()->selectionModel()->selectedItems().normalized();
+    FileInfoSet rawSelection  = app()->selectionModel()->selectedItems();
+    FileInfoSet selectedItems = rawSelection.normalized();
+
+    // Scan root guard, same rule as a RefreshParent cleanup (see
+    // CleanupCollection.h): the toplevel item is never moved to the trash
+    // from within QDirStat, and a multi-item selection containing it points
+    // to a range the user did not see in full. This action has no
+    // confirmation dialog, so this is the only check before QFile::moveToTrash().
+
+    FileInfoSet toplevels = CleanupCollection::toplevelItems( selectedItems );
+
+    if ( ! toplevels.isEmpty() )
+    {
+        CleanupCollection::reportToplevelRefusal( _ui->actionMoveToTrash->text().remove( '&' ),
+                                                  toplevels,
+                                                  rawSelection.size() );
+        return;
+    }
 
     // Save the selection - at least the first selected item
 

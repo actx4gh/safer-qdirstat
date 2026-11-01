@@ -15,6 +15,7 @@
 #include "Cleanup.h"
 #include "StdCleanup.h"
 #include "DirTree.h"
+#include "DirInfo.h"
 #include "Settings.h"
 #include "SettingsHelpers.h"
 #include "SelectionModel.h"
@@ -243,6 +244,21 @@ void CleanupCollection::execute()
 	return;
     }
 
+    // Scan root guard (see CleanupCollection.h). Refuse the whole operation
+    // rather than dropping the toplevel item and continuing: the selection
+    // is not what the user believed it was, and executing the remainder
+    // would hide that. Returning here also skips prepareRefresh() with the
+    // tree's root in the refresh set and the complete re-read that follows.
+
+    FileInfoSet toplevels = toplevelItems( selection );
+
+    if ( ! toplevels.isEmpty() &&
+	 ! allowsToplevel( cleanup->refreshPolicy(), selection.size() ) )
+    {
+	reportToplevelRefusal( cleanup->cleanTitle(), toplevels, selection.size() );
+	return;
+    }
+
     if ( cleanup->askForConfirmation() && ! confirmation( cleanup, selection ) )
     {
 	logDebug() << "User declined confirmation" << endl;
@@ -329,6 +345,103 @@ void CleanupCollection::execute()
     }
 
     outputWindow->noMoreProcesses();
+}
+
+
+FileInfoSet CleanupCollection::toplevelItems( const FileInfoSet & selection )
+{
+    FileInfoSet toplevels;
+
+    foreach ( FileInfo * item, selection )
+    {
+	// Same test as DirTree::isToplevel(): a direct child of the tree's
+	// internal root. Not going through item->tree() so this also works
+	// for items whose tree pointer is not set.
+
+	if ( item && item->parent() && ! item->parent()->parent() )
+	    toplevels << item;
+    }
+
+    return toplevels;
+}
+
+
+bool CleanupCollection::allowsToplevel( Cleanup::RefreshPolicy policy, int selectionSize )
+{
+    switch ( policy )
+    {
+	case Cleanup::NoRefresh:
+	    return true;
+
+	case Cleanup::RefreshThis:
+	    // An explicit action on just the scan root, e.g. "Clear Directory
+	    // Contents"; the normal confirmation still applies. With anything
+	    // else selected along with it, the selection is suspect.
+	    return selectionSize == 1;
+
+	case Cleanup::RefreshParent:
+	case Cleanup::AssumeDeleted:
+	    // Both declare that the item ceases to exist.
+	    return false;
+    }
+
+    return false;
+}
+
+
+void CleanupCollection::reportToplevelRefusal( const QString     & actionTitle,
+					       const FileInfoSet & toplevels,
+					       int		   selectionSize )
+{
+    QStringList urls;
+
+    foreach ( FileInfo * item, toplevels )
+	urls << item->url();
+
+    urls.sort();
+
+    logError() << actionTitle << " refused: the selection of "
+	       << selectionSize << " item(s) contains the toplevel item(s) "
+	       << urls.join( ", " ) << "; nothing executed" << endl;
+
+    QStringList lines;
+
+    foreach ( FileInfo * item, toplevels )
+    {
+	QString label = item->isPkgInfo() ? tr( "Package" ) : tr( "Directory" );
+
+	lines << tr( "<b>%1 <font color=red>%2</font></b>" )
+	    .arg( label )
+	    .arg( item->url().toHtmlEscaped() );
+    }
+
+    lines.sort();
+
+    QString msg = "<html>";
+    msg += tr( "<h3>%1 refused</h3>" ).arg( actionTitle.toHtmlEscaped() );
+    msg += tr( "<p>The selection contains the top level of this directory tree:</p>" );
+    msg += lines.join( "<br>" );
+
+    if ( selectionSize > 1 )
+    {
+	msg += tr( "<p>%1 items are selected. Nothing was executed.<br>"
+		   "Check the selection: it may include rows that are "
+		   "scrolled out of view.</p>" ).arg( selectionSize );
+    }
+    else
+    {
+	msg += tr( "<p>Nothing was executed. QDirStat does not run an action "
+		   "that removes or replaces the top level item.<br>"
+		   "To work on it, open its parent directory instead.</p>" );
+    }
+
+    QMessageBox box( QMessageBox::Critical,
+		     tr( "Not Executed" ),
+		     msg,
+		     QMessageBox::Ok,
+		     qApp->activeWindow() );
+    box.setObjectName( "toplevelRefusal" );
+    box.exec();
 }
 
 

@@ -16,6 +16,7 @@
 
 #include "ListMover.h"
 #include "Cleanup.h"
+#include "FileInfoSet.h"
 
 
 class QMenu;
@@ -130,6 +131,49 @@ namespace QDirStat
 	 * list.
 	 **/
 	ListMover<Cleanup *> * listMover() { return &_listMover; }
+
+
+	//
+	// Scan root guard
+	//
+	// A toplevel item is a direct child of the DirTree's internal root:
+	// the scan root, or a package in a pkg:/ view (DirTree::isToplevel()).
+	// Removing or replacing it is never an in-app operation; the user
+	// rescans from the parent directory instead. A multi-item selection
+	// that contains it is the signature of a selection range the user did
+	// not see in full (rows scrolled out of view), see
+	// https://github.com/shundhammer/qdirstat/issues/329 .
+	//
+	// The rule, by refresh policy:
+	//
+	//   NoRefresh      always allowed (non-modifying by declaration)
+	//   RefreshThis    allowed only as the single selected item
+	//   RefreshParent  never allowed
+	//   AssumeDeleted  never allowed
+	//
+	// MainWindow::moveToTrash() applies the same rule as RefreshParent.
+	//
+
+	/**
+	 * Return the toplevel items in 'selection' (usually empty or exactly
+	 * the scan root).
+	 **/
+	static FileInfoSet toplevelItems( const FileInfoSet & selection );
+
+	/**
+	 * Return 'true' if an action with refresh policy 'policy' may run on a
+	 * selection of 'selectionSize' items that contains a toplevel item.
+	 **/
+	static bool allowsToplevel( Cleanup::RefreshPolicy policy, int selectionSize );
+
+	/**
+	 * Report a refused action to the user (modal message box) and to the
+	 * log: name the action, list the toplevel items, state that nothing
+	 * was executed and that the selection should be checked.
+	 **/
+	static void reportToplevelRefusal( const QString     & actionTitle,
+					   const FileInfoSet & toplevels,
+					   int		       selectionSize );
 
     signals:
 

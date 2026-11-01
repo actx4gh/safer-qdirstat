@@ -23,6 +23,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QMessageBox>
+#include <QAbstractButton>
 
 #include "MainWindow.h"
 #include "QDirStatApp.h"
@@ -35,6 +37,8 @@
 #include "FileInfo.h"
 #include "FileInfoSet.h"
 #include "Logger.h"
+#include "CleanupCollection.h"
+#include "Cleanup.h"
 
 using namespace QDirStat;
 
@@ -98,6 +102,75 @@ private:
 };
 
 
+/**
+ * Record and dismiss modal QMessageBoxes (confirmation, refusal) as soon as
+ * they open, so a blocking exec() in the code under test returns. 'answer'
+ * is the standard button to press; NoButton means Escape / the escape button.
+ **/
+class DialogCatcher: public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit DialogCatcher( QMessageBox::StandardButton answer = QMessageBox::NoButton ):
+	_answer( answer )
+    {
+	connect( &_timer, &QTimer::timeout, this, &DialogCatcher::poll );
+	_timer.start( 20 );
+    }
+
+    int	    count()	   const { return _count;	 }
+    QString objectName()   const { return _objectName; }
+    QString text()	   const { return _text;	 }
+    QString detailedText() const { return _detailedText; }
+    QMessageBox::Icon	        icon()	        const { return _icon;	      }
+    QMessageBox::StandardButton defaultButton() const { return _defaultButton; }
+
+private slots:
+    void poll()
+    {
+	QMessageBox * box = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+
+	if ( ! box )
+	{
+	    _last = 0;
+	    return;
+	}
+
+	if ( box == _last )
+	    return;
+
+	_last	      = box;
+	++_count;
+	_objectName   = box->objectName();
+	_text	      = box->text();
+	_detailedText = box->detailedText();
+	_icon	      = box->icon();
+
+	QAbstractButton * def = box->defaultButton();
+	_defaultButton = def ? box->standardButton( def ) : QMessageBox::NoButton;
+
+	QAbstractButton * button = _answer != QMessageBox::NoButton ? box->button( _answer ) : 0;
+
+	if ( button )
+	    button->click();
+	else
+	    box->reject();
+    }
+
+private:
+    QTimer			_timer;
+    QMessageBox::StandardButton _answer;
+    QMessageBox *		_last = 0;
+    int				_count = 0;
+    QString			_objectName;
+    QString			_text;
+    QString			_detailedText;
+    QMessageBox::Icon		_icon = QMessageBox::NoIcon;
+    QMessageBox::StandardButton _defaultButton = QMessageBox::NoButton;
+};
+
+
 class TestSelection: public QObject
 {
     Q_OBJECT
@@ -121,6 +194,15 @@ private slots:
     void ctrlClickThenShiftClick_keepsCommittedRange();
     void shiftClickWithHiddenAnchor_isPlainClick();
     void shiftClickOnBranchIndicator_togglesExpansion();
+
+    // Scan root guard (fix 2)
+    void deleteCleanup_refusesToplevelInMultiSelection();
+    void deleteCleanup_refusesToplevelAlone();
+    void assumeDeletedCleanup_refusesToplevelAlone();
+    void refreshThisCleanup_allowsToplevelAlone_refusesWithOthers();
+    void noRefreshCleanup_allowsToplevelInMultiSelection();
+    void deleteCleanup_runsWithoutToplevel();
+    void moveToTrash_refusesToplevel();
 
 
 private:
@@ -155,7 +237,19 @@ private:
      **/
     void	  arrangeStaleAnchor( const QString & treemapItem, Qt::KeyboardModifiers treemapMods = Qt::NoModifier );
 
+    /**
+     * Add a cleanup to the test collection whose command drops a marker
+     * file named after the item into _markerDir, so "was it executed" is a
+     * file existence check that does not touch the fixture.
+     **/
+    Cleanup *	  addMarkerCleanup( const QString & title, Cleanup::RefreshPolicy policy );
+    QString	  marker( const QString & relPath ) const;	// marker file for a fixture item
+    void	  select( const QStringList & relPaths );	// via SelectionModel::setSelectedItems()
+    void	  waitForRefresh( QSignalSpy & finished );	// a cleanup's Refresher re-read
+
     QTemporaryDir   _tmp;
+    QString	    _markerDir;
+    CleanupCollection * _cleanups = 0;
     QString	    _root;
     MainWindow *    _win     = 0;
     DirTreeView *   _tree    = 0;
@@ -227,8 +321,17 @@ void TestSelection::initTestCase()
 	QVERIFY( writeFile( name, ( 14 - i ) * 10 * 1024 ) );
     }
 
+    _markerDir = QDir( _tmp.path() ).canonicalPath() + "/markers";
+    QVERIFY( dir.mkpath( _markerDir ) );
+
     _win = new MainWindow();
     QVERIFY( _win );
+
+    // A separate collection for the test cleanups so the application's own
+    // menus stay as they are. Its cleanups are enabled/disabled from the
+    // selection like the real ones (CleanupCollection::updateActions()).
+    _cleanups = new CleanupCollection( app()->selectionModel(), _win );
+    QVERIFY( _cleanups );
 
     _tree    = _win->findChild<DirTreeView *>( "dirTreeView" );
     _treemap = _win->findChild<TreemapView *>( "treemapView" );
@@ -496,6 +599,67 @@ void TestSelection::arrangeStaleAnchor( const QString & treemapItem, Qt::Keyboar
 }
 
 
+Cleanup * TestSelection::addMarkerCleanup( const QString & title, Cleanup::RefreshPolicy policy )
+{
+    // %p is expanded single-quoted by Cleanup::expandVariables(), so the
+    // basename is taken in the shell.
+    QString command = QString( "touch '%1/'$(basename %p)" ).arg( _markerDir );
+
+    Cleanup * cleanup = new Cleanup( command, title, _cleanups );
+    cleanup->setActive( true );
+    cleanup->setWorksForDir( true );
+    cleanup->setWorksForFile( true );
+    cleanup->setWorksForDotEntry( false );
+    cleanup->setAskForConfirmation( false );
+    cleanup->setRefreshPolicy( policy );
+    cleanup->setOutputWindowPolicy( Cleanup::ShowNever );
+    cleanup->setOutputWindowAutoClose( true );
+    _cleanups->add( cleanup );
+
+    return cleanup;
+}
+
+
+QString TestSelection::marker( const QString & rel ) const
+{
+    QString name = rel.isEmpty() ? QString( "root" ) : rel.section( '/', -1 );
+
+    return _markerDir + "/" + name;
+}
+
+
+void TestSelection::select( const QStringList & relPaths )
+{
+    FileInfoSet items;
+
+    foreach ( const QString & rel, relPaths )
+    {
+	FileInfo * item = find( rel );
+	QVERIFY2( item, qPrintable( rel ) );
+	items << item;
+    }
+
+    app()->selectionModel()->setSelectedItems( items );
+
+    QStringList expected = relPaths;
+
+    for ( QString & rel : expected )
+	if ( rel.isEmpty() )
+	    rel = ROOT;
+
+    COMPARE_SELECTION( sorted( expected ) );
+}
+
+
+void TestSelection::waitForRefresh( QSignalSpy & finished )
+{
+    // Cleanup -> QProcess -> OutputWindow::lastProcessFinished() ->
+    // Refresher::refresh() -> DirTree re-read -> finished()
+    QTRY_VERIFY_WITH_TIMEOUT( finished.count() >= 1, 15000 );
+    QTRY_VERIFY( ! app()->dirTree()->isBusy() );
+}
+
+
 //
 // Tests: reproduction of upstream issue #329
 //
@@ -675,6 +839,184 @@ void TestSelection::shiftClickOnBranchIndicator_togglesExpansion()
 
     QVERIFY( _tree->isExpanded( idx( "D_dir" ) ) );
     COMPARE_SELECTION( files( 2, 2 ) );
+}
+
+
+//
+// Tests: scan root guard (fix 2)
+//
+// All cleanups here drop a marker file per item; "nothing executed" is
+// "no marker". Every refusal must show the refusal dialog (object name
+// "toplevelRefusal"): a cleanup that silently did nothing, e.g. because its
+// action was disabled, would otherwise pass these tests for the wrong reason.
+//
+
+void TestSelection::deleteCleanup_refusesToplevelInMultiSelection()
+{
+    Cleanup * cleanup = addMarkerCleanup( "Test Delete", Cleanup::RefreshParent );
+    CHECKED( select( QStringList() << "" << "C_target/f01" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QCOMPARE( dialog.objectName(), QString( "toplevelRefusal" ) );
+    QCOMPARE( dialog.icon(), QMessageBox::Critical );
+    QVERIFY2( dialog.text().contains( "Test Delete" ), qPrintable( dialog.text() ) );
+    QVERIFY2( dialog.text().contains( find( "" )->url().toHtmlEscaped() ), qPrintable( dialog.text() ) );
+    QVERIFY2( dialog.text().contains( "2 items are selected" ), qPrintable( dialog.text() ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "" ) ) );
+    QVERIFY( ! QFile::exists( marker( "C_target/f01" ) ) );
+    QCOMPARE( finished.count(), 0 );	// no prepareRefresh() to the root, no re-read
+    COMPARE_SELECTION( sorted( QStringList() << ROOT << "C_target/f01" ) );
+}
+
+
+void TestSelection::deleteCleanup_refusesToplevelAlone()
+{
+    Cleanup * cleanup = addMarkerCleanup( "Test Delete Alone", Cleanup::RefreshParent );
+    CHECKED( select( QStringList() << "" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QCOMPARE( dialog.objectName(), QString( "toplevelRefusal" ) );
+    QVERIFY2( dialog.text().contains( "Nothing was executed" ), qPrintable( dialog.text() ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "" ) ) );
+    QCOMPARE( finished.count(), 0 );
+}
+
+
+void TestSelection::assumeDeletedCleanup_refusesToplevelAlone()
+{
+    // AssumeDeleted would call DirTree::deleteSubtree() on the scan root.
+    Cleanup * cleanup = addMarkerCleanup( "Test Assume Deleted", Cleanup::AssumeDeleted );
+    CHECKED( select( QStringList() << "" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QCOMPARE( dialog.objectName(), QString( "toplevelRefusal" ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "" ) ) );
+    QVERIFY( find( "" ) );			// still in the tree
+    QVERIFY( find( "C_target/f12" ) );
+}
+
+
+void TestSelection::refreshThisCleanup_allowsToplevelAlone_refusesWithOthers()
+{
+    // The one exception: an explicit single-item action on the scan root
+    // (e.g. "Clear Directory Contents") runs; it is then refreshed.
+    Cleanup * cleanup = addMarkerCleanup( "Test Refresh This", Cleanup::RefreshThis );
+    CHECKED( select( QStringList() << "" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    {
+	QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+	DialogCatcher dialog;
+	cleanup->trigger();
+
+	QTRY_VERIFY_WITH_TIMEOUT( QFile::exists( marker( "" ) ), 5000 );
+	QCOMPARE( dialog.count(), 0 );
+	CHECKED( waitForRefresh( finished ) );
+	QVERIFY( QFile::remove( marker( "" ) ) );
+    }
+
+    // Same cleanup, scan root plus one more item: refused.
+    CHECKED( expandFixture() );			// the refresh recreated the items
+    CHECKED( select( QStringList() << "" << "C_target/f01" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    {
+	QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+	DialogCatcher dialog;
+	cleanup->trigger();
+
+	QCOMPARE( dialog.count(), 1 );
+	QCOMPARE( dialog.objectName(), QString( "toplevelRefusal" ) );
+
+	QTest::qWait( 300 );
+	QVERIFY( ! QFile::exists( marker( "" ) ) );
+	QVERIFY( ! QFile::exists( marker( "C_target/f01" ) ) );
+	QCOMPARE( finished.count(), 0 );
+    }
+}
+
+
+void TestSelection::noRefreshCleanup_allowsToplevelInMultiSelection()
+{
+    // Non-modifying by declaration (open terminal, file manager, ...).
+    Cleanup * cleanup = addMarkerCleanup( "Test No Refresh", Cleanup::NoRefresh );
+    CHECKED( select( QStringList() << "" << "C_target/f01" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QTRY_VERIFY_WITH_TIMEOUT( QFile::exists( marker( "" ) ), 5000 );
+    QTRY_VERIFY_WITH_TIMEOUT( QFile::exists( marker( "C_target/f01" ) ), 5000 );
+    QCOMPARE( dialog.count(), 0 );
+
+    QVERIFY( QFile::remove( marker( "" ) ) );
+    QVERIFY( QFile::remove( marker( "C_target/f01" ) ) );
+}
+
+
+void TestSelection::deleteCleanup_runsWithoutToplevel()
+{
+    // Control: the guard does not get in the way of an ordinary delete.
+    Cleanup * cleanup = addMarkerCleanup( "Test Delete Files", Cleanup::RefreshParent );
+    CHECKED( select( QStringList() << "C_target/f01" << "C_target/f02" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QTRY_VERIFY_WITH_TIMEOUT( QFile::exists( marker( "C_target/f01" ) ), 5000 );
+    QTRY_VERIFY_WITH_TIMEOUT( QFile::exists( marker( "C_target/f02" ) ), 5000 );
+    QCOMPARE( dialog.count(), 0 );
+    CHECKED( waitForRefresh( finished ) );	// RefreshParent re-reads C_target
+
+    QVERIFY( QFile::remove( marker( "C_target/f01" ) ) );
+    QVERIFY( QFile::remove( marker( "C_target/f02" ) ) );
+}
+
+
+void TestSelection::moveToTrash_refusesToplevel()
+{
+    // MainWindow::moveToTrash() is not a Cleanup, has no confirmation
+    // dialog, and first checks that the active window is the main window.
+    _win->activateWindow();
+    QTRY_COMPARE( QApplication::activeWindow(), static_cast<QWidget *>( _win ) );
+
+    CHECKED( select( QStringList() << "" << "C_target/f01" ) );
+
+    DialogCatcher dialog;
+    QVERIFY( QMetaObject::invokeMethod( _win, "moveToTrash", Qt::DirectConnection ) );
+
+    QCOMPARE( dialog.count(), 1 );
+    QCOMPARE( dialog.objectName(), QString( "toplevelRefusal" ) );
+    QVERIFY2( dialog.text().contains( "Move to Trash" ), qPrintable( dialog.text() ) );
+    QVERIFY2( dialog.text().contains( find( "" )->url().toHtmlEscaped() ), qPrintable( dialog.text() ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( QFile::exists( absPath( "" ) ) );
+    QVERIFY( QFile::exists( absPath( "C_target/f01" ) ) );
+    QVERIFY( ! app()->dirTree()->isBusy() );
 }
 
 
