@@ -18,12 +18,13 @@ Fixes carried on top of upstream `master`:
   selection, and say so instead of running the command. A single-item
   `RefreshThis` cleanup on the scan root (Clear Directory Contents) and
   non-modifying cleanups are unaffected.
-- **Confirmation lists every directory.** For a mixed file/directory selection
-  the dialog shows all directories untruncated, directories first, with No as
-  the default button. The 7-entry cap applies to files only.
+- **Confirmation lists every directory.** The dialog states the counts, lists
+  all directories first (long lists complete in the details pane), cuts only
+  files to a few with a count, flags a selection that contains a directory
+  and items inside it, marks the scan root, and defaults to No; Enter does
+  not confirm.
 
-Status: the Shift anchor fix and the scan root guard have landed with their
-tests; the confirmation dialog change is in progress.
+Status: all three fixes have landed with their tests.
 
 Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
 patches as one commit per fix and is rebased onto upstream periodically.
