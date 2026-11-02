@@ -1,5 +1,7 @@
 # safer-qdirstat
 
+[![CI](https://github.com/actx4gh/safer-qdirstat/actions/workflows/ci.yml/badge.svg?branch=safer)](https://github.com/actx4gh/safer-qdirstat/actions/workflows/ci.yml)
+
 A fork of [QDirStat](https://github.com/shundhammer/qdirstat) carrying a small
 set of selection-safety patches. Everything else is upstream, unchanged.
 
@@ -29,8 +31,10 @@ Status: all three fixes have landed with their tests.
 Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
 patches as one commit per fix and is rebased onto upstream periodically.
 Regression tests live in `test/selection` (QTest, Qt 6, run with
-`QT_QPA_PLATFORM=offscreen make check`); `test/selection/RESULTS.md` records
-the runs against `master` and `safer`.
+`QT_QPA_PLATFORM=offscreen make check`). CI builds and runs them on Qt 6.4
+and a current Qt 6, and a second job builds them against `master` and runs
+`test/selection/evidence.sh`, which checks that the tests covering the fixes
+fail without them; `test/selection/RESULTS.md` records those runs.
 
 Background: shundhammer/qdirstat#329.
 

@@ -10,7 +10,7 @@ sync when the matrix changes.
 |-------|-------------------|------------------------------------------|------------|
 | 6.4.2 | Ubuntu 24.04, offscreen | fix 1 tests on master: 6 FAIL, 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS; fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS |
 | 6.8.x | not yet run       | expected: `*_filesOnly` pass (anchor re-sync), `*_shiftHeldDuringTreemapClick` FAIL; fix 2 and fix 3 tests FAIL as on 6.4 | expected 26 PASS |
-| 6.10+ | not yet run       | same as 6.8                              | expected 26 PASS |
+| 6.12.0 | Linux, GCC 16, offscreen (local build) | fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS. master and fix-1-only trees: not yet run (`evidence.sh`) | 26 PASS |
 
 The tests named `*_filesOnly` and `*_shiftHeldDuringTreemapClick` are the
 reproduction of shundhammer/qdirstat#329. On `master` with Qt 6.4.2 every one
@@ -124,6 +124,14 @@ Totals: 26 passed, 0 failed, 0 skipped, 0 blacklisted, 4760ms
 ********* Finished testing of TestSelection *********
 ```
 
+## safer (fix 1 + fix 2 + fix 3), Qt 6.12.0
+
+Linux, GCC 16, offscreen. 26 passed, 0 failed, 4745 ms. Fix 3
+tests against the fix-2 tree on the same machine: 6 FAIL / 1 PASS, same
+assertions as on 6.4.2. The master run on 6.12 (`evidence.sh`) is the open
+item: it decides whether the three `FAIL<6.8` tests pass on master there, as
+the reading of QAbstractItemView::currentChanged() predicts.
+
 ## Fix 2: scan root guard
 
 Tests `deleteCleanup_*`, `assumeDeletedCleanup_*`, `refreshThisCleanup_*`,
@@ -192,37 +200,33 @@ PASS   : TestSelection::confirmation_yesRunsCleanup()
 
 ## How to regenerate
 
+`evidence.sh` in this directory runs every test in its own process against
+a binary built from an UNFIXED tree and checks each result against the
+expectation table inside it (FAIL for the tests that cover a fix, PASS for
+the controls, recorded-only for the plain-click reproductions on Qt >= 6.8).
+It exits non-zero on any unexpected result. CI runs it against `master` on
+every push (job `evidence-on-master`).
+
 From a clone with both branches:
 
 ```bash
-# safer
+# safer: everything must pass
 qmake6 && make -j"$(nproc)"
 QT_QPA_PLATFORM=offscreen ./test/selection/test-selection
 
-# master: same test sources, upstream src/
+# master: same test sources, upstream src/, expectations checked by evidence.sh
 git worktree add ../qdirstat-master master
-cp -r test/selection ../qdirstat-master/test/
+cp -a test/selection ../qdirstat-master/test/
 mkdir -p ../build-master-test && cd ../build-master-test
 qmake6 ../qdirstat-master/test/selection/selection.pro && make -j"$(nproc)"
-QT_QPA_PLATFORM=offscreen ./test-selection
+sh ../qdirstat-master/test/selection/evidence.sh ./test-selection
 ```
 
-For the fix 2 evidence, check out the fix-1 commit instead of `master`
-(`git worktree add ../qdirstat-fix1 <hash of "DirTreeView: anchor Shift
-ranges...">`), build the same way, and run the fix 2 tests one per process:
+For an intermediate commit (e.g. the tree with fix 1 only), check that
+commit out instead of `master`; tests for fixes already present in it will
+then show as UNEXPECTED, which is correct for that tree and only means the
+table applies to `master`.
 
-```bash
-for t in deleteCleanup_refusesToplevelInMultiSelection deleteCleanup_refusesToplevelAlone \
-         assumeDeletedCleanup_refusesToplevelAlone refreshThisCleanup_allowsToplevelAlone_refusesWithOthers \
-         noRefreshCleanup_allowsToplevelInMultiSelection deleteCleanup_runsWithoutToplevel \
-         moveToTrash_refusesToplevel; do
-    QT_QPA_PLATFORM=offscreen ./test-selection $t 2>&1 | grep -E '^(PASS|FAIL)' | grep -v -e initTestCase -e cleanupTestCase
-done
-```
-
-For fix 3, same procedure against the fix-2 commit with the
-`confirmation_*` tests.
-
-The `master` run must show the reproduction tests failing; if it ever passes
-on a Qt version where it is expected to fail, the test has stopped testing
-the mechanism and needs attention before the fix is trusted.
+The `master` run must show the reproduction tests failing; if it ever
+passes on a Qt version where it is expected to fail, the test has stopped
+testing the mechanism and needs attention before the fix is trusted.
