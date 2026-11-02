@@ -9,8 +9,8 @@ sync when the matrix changes.
 | Qt    | platform          | master                                   | safer      |
 |-------|-------------------|------------------------------------------|------------|
 | 6.4.2 | Ubuntu 24.04, offscreen | `evidence.sh` on master: 27 tests, 0 unexpected. Fix 1 tests on master: 6 FAIL, 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS; fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS; fix 4 tests on the fix-3 tree: 2 FAIL, 1 PASS | 29 PASS |
-| 6.12.0 | Linux, GCC 16, offscreen (local build) | `evidence.sh` on master: 24 tests, 0 unexpected (before fix 4). Plain-click reproductions (`shiftClickAfterTreemapClick_filesOnly`, `shiftClickOnIndentation...`, `shiftClickAfterProgrammaticCurrent...`) PASS on master (anchor re-sync); `shiftHeldDuringTreemapClick` and `shiftDrag...filesOnly` FAIL; hidden anchor, all fix 2 and fix 3 tests FAIL; controls PASS. Fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS (before fix 4) |
-| 6.8.x, 6.10.x | not run locally; CI runs 6.10.0 | expected as 6.12 | expected 29 PASS |
+| 6.12.0 | Linux, GCC 16, offscreen (local build) | `evidence.sh` on master: 24 tests, 0 unexpected before fix 4, 27 tests, 0 unexpected with fix 4's three rows. Plain-click reproductions (`shiftClickAfterTreemapClick_filesOnly`, `shiftClickOnIndentation...`, `shiftClickAfterProgrammaticCurrent...`) PASS on master (anchor re-sync); `shiftHeldDuringTreemapClick` and `shiftDrag...filesOnly` FAIL; hidden anchor, all fix 2, fix 3 and fix 4 tests FAIL; controls PASS. Fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS; fix 4 tests on the fix-3 tree: 2 FAIL, 1 PASS | 26 PASS before fix 4; the 29-test run is not recorded here yet |
+| 6.4.3, 6.8.3, 6.10.0, 6.12.0 | CI, ubuntu-24.04, aqt (`.github/workflows/ci.yml`) | `evidence.sh` on master on every push (job `evidence-on-master`), must report 0 unexpected | full suite on every push (job `build-and-test`), must pass; see the Actions tab, run #5 is the first with all four columns |
 
 The tests named `*_filesOnly` and `*_shiftHeldDuringTreemapClick` are the
 reproduction of shundhammer/qdirstat#329. On `master` with Qt 6.4.2 every one
@@ -252,6 +252,33 @@ PASS   : TestSelection::moveToTrash_yesMovesToTrash()
 
 On `master`, Qt 6.4.2, `evidence.sh` with the three new rows: 27 tests,
 0 unexpected (same three verdicts: FAIL, FAIL, PASS).
+
+Qt 6.12.0, local build (Linux, GCC 16, offscreen), fix-4 tests against the
+fix-3 tree one per process; the same two behaviour failures, the control
+passes. The fixture is on a separate `/tmp` volume there, so Qt 6.12 fell back
+to the volume's trash after EXDEV on the home trash, and `removeFromTrash()`
+found and removed every entry in it, directories included. The user id in the
+trash directory name is replaced by `<uid>` below; everything else is the
+raw output.
+
+```
+===== safer with fixes 1 to 3 only (no Move to Trash confirmation), Qt 6.12.0, fix-4 tests one per process =====
+FAIL!  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() 'QFileInfo::exists( absPath( "D_dir" ) )' returned FALSE. (D_dir was moved to the trash without confirmation)
+   Loc: [../qdirstat-fix3/test/selection/test-selection.cpp(1429)]
+QINFO  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() Removed /tmp/QDirStat-pfalGR/root/D_dir from the trash at /tmp/.Trash-<uid>
+QINFO  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() Removed /tmp/QDirStat-pfalGR/root/C_target/f11 from the trash at /tmp/.Trash-<uid>
+QINFO  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() Removed /tmp/QDirStat-pfalGR/root/C_target/f12 from the trash at /tmp/.Trash-<uid>
+FAIL!  : TestSelection::moveToTrash_enterDoesNotConfirm() 'QFileInfo::exists( absPath( "C_target" ) )' returned FALSE. (C_target was moved to the trash (no dialog, or Enter confirmed it))
+   Loc: [../qdirstat-fix3/test/selection/test-selection.cpp(1466)]
+QINFO  : TestSelection::moveToTrash_enterDoesNotConfirm() Removed /tmp/QDirStat-iZDCsP/root/C_target from the trash at /tmp/.Trash-<uid>
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() confirmation dialogs shown: 0
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() f12 was in the trash at /tmp/.Trash-<uid>
+PASS   : TestSelection::moveToTrash_yesMovesToTrash()
+```
+
+Both trash directories (`~/.qttest/share/Trash/files` and `/tmp/.Trash-<uid>/files`)
+were empty afterwards. `evidence.sh` on master, Qt 6.12.0, with the three new
+rows: 27 tests, 0 unexpected.
 
 ## How to regenerate
 
