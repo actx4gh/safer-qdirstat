@@ -8,9 +8,9 @@ sync when the matrix changes.
 
 | Qt    | platform          | master                                   | safer      |
 |-------|-------------------|------------------------------------------|------------|
-| 6.4.2 | Ubuntu 24.04, offscreen | fix 1 tests on master: 6 FAIL, 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS; fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS |
-| 6.12.0 | Linux, GCC 16, offscreen (local build) | `evidence.sh` on master: 24 tests, 0 unexpected. Plain-click reproductions (`shiftClickAfterTreemapClick_filesOnly`, `shiftClickOnIndentation...`, `shiftClickAfterProgrammaticCurrent...`) PASS on master (anchor re-sync); `shiftHeldDuringTreemapClick` and `shiftDrag...filesOnly` FAIL; hidden anchor, all fix 2 and fix 3 tests FAIL; controls PASS. Fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS |
-| 6.8.x, 6.10.x | not run locally; CI runs 6.10.0 | expected as 6.12 | expected 26 PASS |
+| 6.4.2 | Ubuntu 24.04, offscreen | `evidence.sh` on master: 27 tests, 0 unexpected. Fix 1 tests on master: 6 FAIL, 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS; fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS; fix 4 tests on the fix-3 tree: 2 FAIL, 1 PASS | 29 PASS |
+| 6.12.0 | Linux, GCC 16, offscreen (local build) | `evidence.sh` on master: 24 tests, 0 unexpected (before fix 4). Plain-click reproductions (`shiftClickAfterTreemapClick_filesOnly`, `shiftClickOnIndentation...`, `shiftClickAfterProgrammaticCurrent...`) PASS on master (anchor re-sync); `shiftHeldDuringTreemapClick` and `shiftDrag...filesOnly` FAIL; hidden anchor, all fix 2 and fix 3 tests FAIL; controls PASS. Fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS (before fix 4) |
+| 6.8.x, 6.10.x | not run locally; CI runs 6.10.0 | expected as 6.12 | expected 29 PASS |
 
 The tests named `*_filesOnly` and `*_shiftHeldDuringTreemapClick` are the
 reproduction of shundhammer/qdirstat#329. On `master` with Qt 6.4.2 every one
@@ -58,7 +58,10 @@ Totals: 6 passed, 6 failed, 0 skipped, 0 blacklisted, 674ms
 ********* Finished testing of TestSelection *********
 ```
 
-## safer (fix 1 + fix 2 + fix 3), Qt 6.4.2
+## safer (fixes 1 to 4), Qt 6.4.2
+
+Full run, 29 tests. The offscreen platform plugin's repeated
+`QWARN: This plugin does not support propagateSizeHints()` lines are left out.
 
 ```
 ********* Start testing of TestSelection *********
@@ -84,43 +87,17 @@ PASS   : TestSelection::moveToTrash_refusesToplevel()
 PASS   : TestSelection::confirmation_listsAllDirectoriesAndDefaultsToNo()
 PASS   : TestSelection::confirmation_enterDoesNotConfirm()
 PASS   : TestSelection::confirmation_filesAreCutWithACount()
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d01
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d02
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d03
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d04
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d05
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d06
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d07
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d08
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d09
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d10
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d11
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d12
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d13
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d14
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d15
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d16
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d17
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d18
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d19
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d20
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d21
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d22
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d23
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d24
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d25
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d26
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d27
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d28
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d29
-  /tmp/QDirStat-ZajIQX/root/E_dirs/d30
-
 PASS   : TestSelection::confirmation_longDirectoryListGoesToDetails()
 PASS   : TestSelection::confirmation_flagsNestedSelection()
 PASS   : TestSelection::confirmation_marksScanRoot()
 PASS   : TestSelection::confirmation_yesRunsCleanup()
+PASS   : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo()
+PASS   : TestSelection::moveToTrash_enterDoesNotConfirm()
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() confirmation dialogs shown: 1
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() f12 was in the trash at /root/.qttest/share/Trash
+PASS   : TestSelection::moveToTrash_yesMovesToTrash()
 PASS   : TestSelection::cleanupTestCase()
-Totals: 26 passed, 0 failed, 0 skipped, 0 blacklisted, 4760ms
+Totals: 29 passed, 0 failed, 0 skipped, 0 blacklisted, 5701ms
 ********* Finished testing of TestSelection *********
 ```
 
@@ -184,8 +161,9 @@ on the visible current item"), Qt 6.4.2. The tests were run one per process:
 without the guard, `assumeDeletedCleanup_refusesToplevelAlone` removes the
 scan root from the tree and `moveToTrash_refusesToplevel` moves the fixture
 directory to the trash, which breaks every later test in the same process.
-Running them against an unguarded tree therefore leaves a small fixture
-directory in the trash; empty it afterwards.
+Since fix 4, `moveToTrash_refusesToplevel` takes the fixture directory out
+of the trash again at the end (`TrashGuard`); before that, a run against an
+unguarded tree left it there.
 
 ```
 ===== safer with fix 1 only (no scan root guard), Qt 6.4.2, each fix-2 test run on its own =====
@@ -237,6 +215,43 @@ FAIL!  : TestSelection::confirmation_marksScanRoot() 'text.contains( "SCAN ROOT"
    Loc: [../work-fix2/test/selection/test-selection.cpp(1222)]
 PASS   : TestSelection::confirmation_yesRunsCleanup()
 ```
+
+## Fix 4: Move to Trash confirmation
+
+Tests `moveToTrash_asksForConfirmationAndDefaultsToNo`,
+`moveToTrash_enterDoesNotConfirm` and the control `moveToTrash_yesMovesToTrash`.
+Against the tree with fixes 1 to 3 (commit "evidence: Qt 6.12 results; the
+Shift-drag reproduction fails on every Qt", `34b5e76`), Qt 6.4.2, one test per
+process. The two declining tests fail on the behaviour: the items are in the
+trash. The control passes on every tree (without the dialog the item is simply
+moved).
+
+Every Move to Trash test takes its items out of the trash again at the end
+(`TrashGuard` / `removeFromTrash()` in the test source), so these runs leave
+nothing behind, and the control restores the trashed file and refreshes the
+tree. The `QINFO` lines name the trash directory that was used: the home trash
+under test mode (`~/.qttest/share/Trash`) when the fixture is on the home
+volume, the fixture volume's `.Trash-<uid>` otherwise (Qt 6.8+ falls back to
+it on EXDEV). Qt 6.4 needs `~/.qttest/share` to exist, or it moves the item
+to `./files/` in the current directory instead; `main()` creates it.
+
+```
+===== safer with fixes 1 to 3 only (no Move to Trash confirmation), Qt 6.4.2, fix-4 tests one per process =====
+FAIL!  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() 'QFileInfo::exists( absPath( "D_dir" ) )' returned FALSE. (D_dir was moved to the trash without confirmation)
+   Loc: [../fix3-eval/test/selection/test-selection.cpp(1429)]
+QINFO  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() Removed /tmp/QDirStat-XgarPj/root/D_dir from the trash at /root/.qttest/share/Trash
+QINFO  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() Removed /tmp/QDirStat-XgarPj/root/C_target/f11 from the trash at /root/.qttest/share/Trash
+QINFO  : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo() Removed /tmp/QDirStat-XgarPj/root/C_target/f12 from the trash at /root/.qttest/share/Trash
+FAIL!  : TestSelection::moveToTrash_enterDoesNotConfirm() 'QFileInfo::exists( absPath( "C_target" ) )' returned FALSE. (C_target was moved to the trash (no dialog, or Enter confirmed it))
+   Loc: [../fix3-eval/test/selection/test-selection.cpp(1466)]
+QINFO  : TestSelection::moveToTrash_enterDoesNotConfirm() Removed /tmp/QDirStat-jlWJCp/root/C_target from the trash at /root/.qttest/share/Trash
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() confirmation dialogs shown: 0
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() f12 was in the trash at /root/.qttest/share/Trash
+PASS   : TestSelection::moveToTrash_yesMovesToTrash()
+```
+
+On `master`, Qt 6.4.2, `evidence.sh` with the three new rows: 27 tests,
+0 unexpected (same three verdicts: FAIL, FAIL, PASS).
 
 ## How to regenerate
 

@@ -25,8 +25,12 @@ Fixes carried on top of upstream `master`:
   files to a few with a count, flags a selection that contains a directory
   and items inside it, marks the scan root, and defaults to No; Enter does
   not confirm.
+- **Move to Trash asks first.** Upstream moves the selection to the trash
+  with no confirmation at all; with the Del shortcut, a selection range that
+  includes rows scrolled out of view is gone before it is seen. The fork
+  shows the same confirmation dialog as for a cleanup, for every selection.
 
-Status: all three fixes have landed with their tests.
+Status: all four fixes have landed with their tests.
 
 Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
 patches as one commit per fix and is rebased onto upstream periodically.

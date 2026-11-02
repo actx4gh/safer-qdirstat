@@ -175,6 +175,19 @@ namespace QDirStat
 					   const FileInfoSet & toplevels,
 					   int		       selectionSize );
 
+	/**
+	 * Ask the user to confirm the action named 'actionTitle' (a cleanup's
+	 * clean title, or "Move to Trash") on 'items'. Returns 'true' if the
+	 * user accepts, 'false' otherwise.
+	 *
+	 * All directories are listed (long lists in the details pane), files
+	 * are cut to a few with a count, nested selections are flagged, the
+	 * scan root is marked, and the default button is "No": Enter never
+	 * confirms. Static so that MainWindow::moveToTrash(), which is not a
+	 * Cleanup, shows the same dialog as a cleanup.
+	 **/
+	static bool confirmation( const QString & actionTitle, const FileInfoSet & items );
+
     signals:
 
 	/**
@@ -239,16 +252,6 @@ namespace QDirStat
 
 
     protected:
-
-	/**
-	 * Ask user for confirmation to execute a cleanup action for
-	 * 'items'. Returns 'true' if user accepts, 'false' otherwise.
-	 *
-	 * All directories are listed (long lists in the details pane), files
-	 * are cut to a few with a count, nested selections are flagged, the
-	 * scan root is marked, and the default button is "No".
-	 **/
-	bool confirmation( Cleanup * cleanup, const FileInfoSet & items );
 
 	/**
 	 * Return one HTML line for 'item' in the confirmation dialog: the

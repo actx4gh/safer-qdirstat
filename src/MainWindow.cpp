@@ -1156,19 +1156,37 @@ void MainWindow::moveToTrash()
     FileInfoSet rawSelection  = app()->selectionModel()->selectedItems();
     FileInfoSet selectedItems = rawSelection.normalized();
 
+    if ( rawSelection.isEmpty() )
+    {
+        logWarning() << "Nothing selected" << endl;
+        return;
+    }
+
+    QString actionTitle = _ui->actionMoveToTrash->text().remove( '&' );
+
     // Scan root guard, same rule as a RefreshParent cleanup (see
     // CleanupCollection.h): the toplevel item is never moved to the trash
     // from within QDirStat, and a multi-item selection containing it points
-    // to a range the user did not see in full. This action has no
-    // confirmation dialog, so this is the only check before QFile::moveToTrash().
+    // to a range the user did not see in full.
 
     FileInfoSet toplevels = CleanupCollection::toplevelItems( selectedItems );
 
     if ( ! toplevels.isEmpty() )
     {
-        CleanupCollection::reportToplevelRefusal( _ui->actionMoveToTrash->text().remove( '&' ),
-                                                  toplevels,
-                                                  rawSelection.size() );
+        CleanupCollection::reportToplevelRefusal( actionTitle, toplevels, rawSelection.size() );
+        return;
+    }
+
+    // Confirmation, always, with the same dialog as a cleanup: every
+    // directory listed, a directory selected together with items inside it
+    // flagged, "No" as the default button. With the Del shortcut this is the
+    // only place where the user sees the whole selection, including rows
+    // scrolled out of view, before anything is moved. The selection as made
+    // (not normalized) is what the dialog shows, as for a cleanup.
+
+    if ( ! CleanupCollection::confirmation( actionTitle, rawSelection ) )
+    {
+        logDebug() << "User declined confirmation" << endl;
         return;
     }
 

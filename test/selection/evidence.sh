@@ -12,7 +12,9 @@
 #
 # Each test runs in its own process: without the fixes, some tests alter the
 # tree (AssumeDeleted on the scan root) or the fixture (Move to Trash) and
-# would break every later test in the same process.
+# would break every later test in the same process. The Move to Trash tests
+# take their items out of the trash again afterwards (TrashGuard in the
+# test source), on every tree.
 #
 # Expectations per test, on a tree WITHOUT the fixes:
 #
@@ -73,6 +75,10 @@ confirmation_longDirectoryListGoesToDetails                FAIL
 confirmation_flagsNestedSelection                          FAIL
 confirmation_marksScanRoot                                 FAIL
 confirmation_yesRunsCleanup                                PASS
+# fix 4: Move to Trash confirmation
+moveToTrash_asksForConfirmationAndDefaultsToNo             FAIL
+moveToTrash_enterDoesNotConfirm                            FAIL
+moveToTrash_yesMovesToTrash                                PASS
 '
 
 TMP=$(mktemp)
