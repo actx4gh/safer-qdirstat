@@ -112,11 +112,20 @@ class DialogCatcher: public QObject
     Q_OBJECT
 
 public:
-    explicit DialogCatcher( QMessageBox::StandardButton answer = QMessageBox::NoButton ):
+    /** Answer every message box with 'key' (Escape by default). **/
+    explicit DialogCatcher( Qt::Key key = Qt::Key_Escape ):
+	_key( key ),
+	_answer( QMessageBox::NoButton )
+    {
+	start();
+    }
+
+    /** Answer every message box by clicking its 'answer' button. **/
+    explicit DialogCatcher( QMessageBox::StandardButton answer ):
+	_key( Qt::Key_unknown ),
 	_answer( answer )
     {
-	connect( &_timer, &QTimer::timeout, this, &DialogCatcher::poll );
-	_timer.start( 20 );
+	start();
     }
 
     int	    count()	   const { return _count;	 }
@@ -155,11 +164,18 @@ private slots:
 	if ( button )
 	    button->click();
 	else
-	    box->reject();
+	    QTest::keyClick( box, _key );	// what the user would press
     }
 
 private:
+    void start()
+    {
+	connect( &_timer, &QTimer::timeout, this, &DialogCatcher::poll );
+	_timer.start( 20 );
+    }
+
     QTimer			_timer;
+    Qt::Key			_key;
     QMessageBox::StandardButton _answer;
     QMessageBox *		_last = 0;
     int				_count = 0;
@@ -204,6 +220,15 @@ private slots:
     void deleteCleanup_runsWithoutToplevel();
     void moveToTrash_refusesToplevel();
 
+    // Confirmation dialog (fix 3)
+    void confirmation_listsAllDirectoriesAndDefaultsToNo();
+    void confirmation_enterDoesNotConfirm();
+    void confirmation_filesAreCutWithACount();
+    void confirmation_longDirectoryListGoesToDetails();
+    void confirmation_flagsNestedSelection();
+    void confirmation_marksScanRoot();
+    void confirmation_yesRunsCleanup();
+
 
 private:
 
@@ -217,6 +242,7 @@ private:
 
     QStringList	  selected() const;		// sorted relative paths
     QStringList	  files( int from, int to ) const;	// "C_target/fNN" for from..to
+    QStringList	  dirs( int from, int to ) const;	// "E_dirs/dNN" for from..to
     QStringList	  sorted( QStringList list ) const;
 
     void	  expandFixture();
@@ -264,12 +290,13 @@ private:
 //   A_dir/a           1200 KiB
 //   B_dir/b           1000 KiB
 //   C_target/f01..f12  130 KiB .. 20 KiB, 10 KiB steps (f01 largest)
+//   E_dirs/d01..d30/x    4 KiB each (confirmation dialog tests only)
 //   D_dir/g1, g2         8 KiB, 4 KiB
 //
 // QDirStat sorts by allocated size, descending, after every read
 // (MainWindow::idleDisplay()), so the row order with C_target expanded is
 //
-//   root, A_dir, B_dir, C_target, f01 .. f12, D_dir
+//   root, A_dir, B_dir, C_target, f01 .. f12, E_dirs, D_dir
 //
 // i.e. two collapsed sibling directories between the toplevel and the
 // clicked files, as in the issue. Sizes are multiples of 4 KiB apart so
@@ -321,6 +348,16 @@ void TestSelection::initTestCase()
 	QVERIFY( writeFile( name, ( 14 - i ) * 10 * 1024 ) );
     }
 
+    // 30 small directories for the confirmation dialog tests; E_dirs stays
+    // collapsed in the Shift tests. ~244 KiB allocated: sorts between
+    // C_target and D_dir.
+    for ( int i = 1; i <= 30; ++i )
+    {
+	QString d = QString( "%1/E_dirs/d%2" ).arg( _root ).arg( i, 2, 10, QChar( '0' ) );
+	QVERIFY( dir.mkpath( d ) );
+	QVERIFY( writeFile( d + "/x", 4 * 1024 ) );
+    }
+
     _markerDir = QDir( _tmp.path() ).canonicalPath() + "/markers";
     QVERIFY( dir.mkpath( _markerDir ) );
 
@@ -340,7 +377,7 @@ void TestSelection::initTestCase()
 
     // Small window: only a few tree rows visible, so the toplevel row is
     // scrolled out of view once the end of C_target is current (the fixture
-    // has 17 rows with C_target expanded). The exact count is checked
+    // has 18 rows with C_target expanded). The exact count is checked
     // below, after the tree is filled.
     _win->resize( 900, 440 );
     _win->show();
@@ -362,11 +399,13 @@ void TestSelection::initTestCase()
     QCOMPARE( _tree->indexBelow( idx( "B_dir" )   ), idx( "C_target" ) );
     QCOMPARE( _tree->indexBelow( idx( "C_target") ), idx( "C_target/f01" ) );
     QCOMPARE( _tree->indexBelow( idx( "C_target/f11" ) ), idx( "C_target/f12" ) );
-    QCOMPARE( _tree->indexBelow( idx( "C_target/f12" ) ), idx( "D_dir" ) );
+    QCOMPARE( _tree->indexBelow( idx( "C_target/f12" ) ), idx( "E_dirs" ) );
+    QCOMPARE( _tree->indexBelow( idx( "E_dirs" ) ), idx( "D_dir" ) );
+    QVERIFY( find( "E_dirs/d30/x" ) );
 
     // Between 5 and 12 rows visible: enough for the drag tests (5 rows in
     // view at once), few enough that the toplevel row scrolls out of view
-    // with f12 at the bottom (f12 is row 15 of 0..16).
+    // with f12 at the bottom (f12 is row 15 of 0..17).
     int rowHeight   = _tree->visualRect( idx( "" ) ).height();
     int visibleRows = rowHeight > 0 ? _tree->viewport()->height() / rowHeight : 0;
     QVERIFY2( visibleRows >= 5 && visibleRows <= 12,
@@ -453,6 +492,17 @@ QStringList TestSelection::files( int from, int to ) const
 
     for ( int i = from; i <= to; ++i )
 	result << QString( "C_target/f%1" ).arg( i, 2, 10, QChar( '0' ) );
+
+    return sorted( result );
+}
+
+
+QStringList TestSelection::dirs( int from, int to ) const
+{
+    QStringList result;
+
+    for ( int i = from; i <= to; ++i )
+	result << QString( "E_dirs/d%1" ).arg( i, 2, 10, QChar( '0' ) );
 
     return sorted( result );
 }
@@ -1017,6 +1067,187 @@ void TestSelection::moveToTrash_refusesToplevel()
     QVERIFY( QFile::exists( absPath( "" ) ) );
     QVERIFY( QFile::exists( absPath( "C_target/f01" ) ) );
     QVERIFY( ! app()->dirTree()->isBusy() );
+}
+
+
+//
+// Tests: confirmation dialog (fix 3)
+//
+// The confirmation box has object name "cleanupConfirmation". Every test
+// here declines (Escape or Enter) except the last one, so the marker
+// command must not run; the tests on the previous tree fail on the content
+// assertions (truncated directories, no default button, no nested-selection
+// note, no scan root marker) or, for Enter, on the cleanup actually running.
+//
+
+void TestSelection::confirmation_listsAllDirectoriesAndDefaultsToNo()
+{
+    Cleanup * cleanup = addMarkerCleanup( "Test Confirm Dirs", Cleanup::RefreshThis );
+    cleanup->setAskForConfirmation( true );
+    CHECKED( select( dirs( 1, 10 ) + files( 1, 3 ) ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog;			// Escape
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QString text = dialog.text();
+
+    // Every directory is listed (the old dialog cut them to 7)
+    foreach ( const QString & rel, dirs( 1, 10 ) )
+	QVERIFY2( text.contains( find( rel )->url().toHtmlEscaped() ), qPrintable( rel + " missing in:\n" + text ) );
+
+    foreach ( const QString & rel, files( 1, 3 ) )
+	QVERIFY2( text.contains( find( rel )->url().toHtmlEscaped() ), qPrintable( rel + " missing in:\n" + text ) );
+
+    QVERIFY2( text.contains( "Test Confirm Dirs" ), qPrintable( text ) );
+    QVERIFY2( text.contains( "10 directories and 3 files" ), qPrintable( text ) );
+    QVERIFY2( ! text.contains( "inside that directory" ), qPrintable( text ) );
+    QVERIFY( dialog.detailedText().isEmpty() );
+
+    // No is the default (the old dialog had none set, so Enter meant Yes)
+    QCOMPARE( dialog.defaultButton(), QMessageBox::No );
+    QCOMPARE( dialog.icon(), QMessageBox::Warning );
+    QCOMPARE( dialog.objectName(), QString( "cleanupConfirmation" ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "E_dirs/d01" ) ) );
+    QVERIFY( ! QFile::exists( marker( "C_target/f01" ) ) );
+}
+
+
+void TestSelection::confirmation_enterDoesNotConfirm()
+{
+    Cleanup * cleanup = addMarkerCleanup( "Test Confirm Enter", Cleanup::RefreshThis );
+    cleanup->setAskForConfirmation( true );
+    CHECKED( select( files( 4, 5 ) ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog( Qt::Key_Return );
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+
+    QTest::qWait( 500 );
+    QVERIFY2( ! QFile::exists( marker( "C_target/f04" ) ), "Enter confirmed the cleanup" );
+    QVERIFY2( ! QFile::exists( marker( "C_target/f05" ) ), "Enter confirmed the cleanup" );
+    QCOMPARE( dialog.defaultButton(), QMessageBox::No );
+}
+
+
+void TestSelection::confirmation_filesAreCutWithACount()
+{
+    Cleanup * cleanup = addMarkerCleanup( "Test Confirm Files", Cleanup::RefreshThis );
+    cleanup->setAskForConfirmation( true );
+    CHECKED( select( files( 1, 10 ) ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QString text = dialog.text();
+    QVERIFY2( text.contains( "10 files" ), qPrintable( text ) );
+    QVERIFY2( text.contains( find( "C_target/f07" )->url().toHtmlEscaped() ), qPrintable( text ) );
+    QVERIFY2( ! text.contains( find( "C_target/f08" )->url().toHtmlEscaped() ), qPrintable( text ) );
+    QVERIFY2( text.contains( "... 3 more files" ), qPrintable( text ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "C_target/f01" ) ) );
+}
+
+
+void TestSelection::confirmation_longDirectoryListGoesToDetails()
+{
+    Cleanup * cleanup = addMarkerCleanup( "Test Confirm Many Dirs", Cleanup::RefreshThis );
+    cleanup->setAskForConfirmation( true );
+    CHECKED( select( dirs( 1, 30 ) ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QString text    = dialog.text();
+    QString details = dialog.detailedText();
+
+    QVERIFY2( text.contains( "30 directories" ), qPrintable( text ) );
+    QVERIFY2( text.contains( "Show Details" ), qPrintable( text ) );
+    QVERIFY2( text.contains( find( "E_dirs/d10" )->url().toHtmlEscaped() ), qPrintable( text ) );
+    QVERIFY2( ! text.contains( find( "E_dirs/d11" )->url().toHtmlEscaped() ), qPrintable( text ) );
+
+    foreach ( const QString & rel, dirs( 1, 30 ) )
+	QVERIFY2( details.contains( find( rel )->url() ), qPrintable( rel + "\n" + details ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "E_dirs/d01" ) ) );
+    QVERIFY( ! QFile::exists( marker( "E_dirs/d30" ) ) );
+}
+
+
+void TestSelection::confirmation_flagsNestedSelection()
+{
+    Cleanup * cleanup = addMarkerCleanup( "Test Confirm Nested", Cleanup::RefreshThis );
+    cleanup->setAskForConfirmation( true );
+    CHECKED( select( QStringList() << "C_target" << "C_target/f01" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QString text = dialog.text();
+    QVERIFY2( text.contains( "1 directory and 1 file" ), qPrintable( text ) );
+    QVERIFY2( text.contains( "inside that directory" ), qPrintable( text ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "C_target" ) ) );
+    QVERIFY( ! QFile::exists( marker( "C_target/f01" ) ) );
+}
+
+
+void TestSelection::confirmation_marksScanRoot()
+{
+    // Only reachable as the single item of a RefreshThis cleanup (fix 2).
+    Cleanup * cleanup = addMarkerCleanup( "Test Confirm Root", Cleanup::RefreshThis );
+    cleanup->setAskForConfirmation( true );
+    CHECKED( select( QStringList() << "" ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    DialogCatcher dialog;
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QString text = dialog.text();
+    QVERIFY2( text.contains( "SCAN ROOT" ), qPrintable( text ) );
+    QVERIFY2( text.contains( find( "" )->url().toHtmlEscaped() ), qPrintable( text ) );
+    QCOMPARE( dialog.defaultButton(), QMessageBox::No );
+    QCOMPARE( dialog.objectName(), QString( "cleanupConfirmation" ) );
+
+    QTest::qWait( 300 );
+    QVERIFY( ! QFile::exists( marker( "" ) ) );
+}
+
+
+void TestSelection::confirmation_yesRunsCleanup()
+{
+    // Control: Yes still runs the cleanup.
+    Cleanup * cleanup = addMarkerCleanup( "Test Confirm Yes", Cleanup::RefreshParent );
+    cleanup->setAskForConfirmation( true );
+    CHECKED( select( files( 6, 7 ) ) );
+    QVERIFY( cleanup->isEnabled() );
+
+    QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+    DialogCatcher dialog( QMessageBox::Yes );
+    cleanup->trigger();
+
+    QCOMPARE( dialog.count(), 1 );
+    QTRY_VERIFY_WITH_TIMEOUT( QFile::exists( marker( "C_target/f06" ) ), 5000 );
+    QTRY_VERIFY_WITH_TIMEOUT( QFile::exists( marker( "C_target/f07" ) ), 5000 );
+    CHECKED( waitForRefresh( finished ) );
+
+    QVERIFY( QFile::remove( marker( "C_target/f06" ) ) );
+    QVERIFY( QFile::remove( marker( "C_target/f07" ) ) );
 }
 
 

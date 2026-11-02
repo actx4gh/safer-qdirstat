@@ -8,9 +8,9 @@ sync when the matrix changes.
 
 | Qt    | platform          | master                                   | safer      |
 |-------|-------------------|------------------------------------------|------------|
-| 6.4.2 | Ubuntu 24.04, offscreen | fix 1 tests: 6 FAIL (5 reproduction + hidden anchor), 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS | 19 PASS |
-| 6.8.x | not yet run       | expected: `*_filesOnly` pass (anchor re-sync), `*_shiftHeldDuringTreemapClick` FAIL; fix 2 tests FAIL as on 6.4 | expected 19 PASS |
-| 6.10+ | not yet run       | same as 6.8                              | expected 19 PASS |
+| 6.4.2 | Ubuntu 24.04, offscreen | fix 1 tests on master: 6 FAIL, 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS; fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS |
+| 6.8.x | not yet run       | expected: `*_filesOnly` pass (anchor re-sync), `*_shiftHeldDuringTreemapClick` FAIL; fix 2 and fix 3 tests FAIL as on 6.4 | expected 26 PASS |
+| 6.10+ | not yet run       | same as 6.8                              | expected 26 PASS |
 
 The tests named `*_filesOnly` and `*_shiftHeldDuringTreemapClick` are the
 reproduction of shundhammer/qdirstat#329. On `master` with Qt 6.4.2 every one
@@ -58,10 +58,9 @@ Totals: 6 passed, 6 failed, 0 skipped, 0 blacklisted, 674ms
 ********* Finished testing of TestSelection *********
 ```
 
-## safer (fix 1 + fix 2), Qt 6.4.2
+## safer (fix 1 + fix 2 + fix 3), Qt 6.4.2
 
 ```
-===== safer (fix 1 + fix 2) =====
 ********* Start testing of TestSelection *********
 Config: Using QtTest library 6.4.2, Qt 6.4.2 (x86_64-little_endian-lp64 shared (dynamic) release build; by GCC 13.2.0), ubuntu 24.04
 PASS   : TestSelection::initTestCase()
@@ -82,8 +81,46 @@ PASS   : TestSelection::refreshThisCleanup_allowsToplevelAlone_refusesWithOthers
 PASS   : TestSelection::noRefreshCleanup_allowsToplevelInMultiSelection()
 PASS   : TestSelection::deleteCleanup_runsWithoutToplevel()
 PASS   : TestSelection::moveToTrash_refusesToplevel()
+PASS   : TestSelection::confirmation_listsAllDirectoriesAndDefaultsToNo()
+PASS   : TestSelection::confirmation_enterDoesNotConfirm()
+PASS   : TestSelection::confirmation_filesAreCutWithACount()
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d01
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d02
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d03
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d04
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d05
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d06
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d07
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d08
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d09
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d10
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d11
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d12
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d13
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d14
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d15
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d16
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d17
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d18
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d19
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d20
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d21
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d22
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d23
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d24
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d25
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d26
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d27
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d28
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d29
+  /tmp/QDirStat-ZajIQX/root/E_dirs/d30
+
+PASS   : TestSelection::confirmation_longDirectoryListGoesToDetails()
+PASS   : TestSelection::confirmation_flagsNestedSelection()
+PASS   : TestSelection::confirmation_marksScanRoot()
+PASS   : TestSelection::confirmation_yesRunsCleanup()
 PASS   : TestSelection::cleanupTestCase()
-Totals: 19 passed, 0 failed, 0 skipped, 0 blacklisted, 2493ms
+Totals: 26 passed, 0 failed, 0 skipped, 0 blacklisted, 4760ms
 ********* Finished testing of TestSelection *********
 ```
 
@@ -128,6 +165,31 @@ FAIL!  : TestSelection::moveToTrash_refusesToplevel() Compared values are not th
    Loc: [../work-fix1/test/selection/test-selection.cpp(1011)]
 ```
 
+## Fix 3: confirmation dialog
+
+Tests `confirmation_*`. Against the tree with fixes 1 and 2 only (commit
+"CleanupCollection, MainWindow: refuse destructive actions on the scan
+root"), Qt 6.4.2, one test per process. Six fail on the behaviour: directories
+missing from the dialog, Enter confirming the cleanup, no counts, no details
+pane, no nested-selection note, no scan root marker. The Yes control passes.
+
+```
+===== safer with fix 1 + fix 2 only (old confirmation dialog), Qt 6.4.2, fix-3 tests one per process =====
+FAIL!  : TestSelection::confirmation_listsAllDirectoriesAndDefaultsToNo() 'text.contains( find( rel )->url().toHtmlEscaped() )' returned FALSE. (E_dirs/d01 missing in:
+   Loc: [../work-fix2/test/selection/test-selection.cpp(1098)]
+FAIL!  : TestSelection::confirmation_enterDoesNotConfirm() '! QFile::exists( marker( "C_target/f04" ) )' returned FALSE. (Enter confirmed the cleanup)
+   Loc: [../work-fix2/test/selection/test-selection.cpp(1132)]
+FAIL!  : TestSelection::confirmation_filesAreCutWithACount() 'text.contains( "10 files" )' returned FALSE. (<html><h3>Test Confirm Files</h3> for:<br>
+   Loc: [../work-fix2/test/selection/test-selection.cpp(1150)]
+FAIL!  : TestSelection::confirmation_longDirectoryListGoesToDetails() 'text.contains( "30 directories" )' returned FALSE. (<html><h3>Test Confirm Many Dirs</h3> for:<br>
+   Loc: [../work-fix2/test/selection/test-selection.cpp(1174)]
+FAIL!  : TestSelection::confirmation_flagsNestedSelection() 'text.contains( "1 directory and 1 file" )' returned FALSE. (<html><h3>Test Confirm Nested</h3> for:<br>
+   Loc: [../work-fix2/test/selection/test-selection.cpp(1200)]
+FAIL!  : TestSelection::confirmation_marksScanRoot() 'text.contains( "SCAN ROOT" )' returned FALSE. (<html><h3>Test Confirm Root</h3>for <b>directory</b> /tmp/QDirStat-NJVJcv/root<br>)
+   Loc: [../work-fix2/test/selection/test-selection.cpp(1222)]
+PASS   : TestSelection::confirmation_yesRunsCleanup()
+```
+
 ## How to regenerate
 
 From a clone with both branches:
@@ -157,6 +219,9 @@ for t in deleteCleanup_refusesToplevelInMultiSelection deleteCleanup_refusesTopl
     QT_QPA_PLATFORM=offscreen ./test-selection $t 2>&1 | grep -E '^(PASS|FAIL)' | grep -v -e initTestCase -e cleanupTestCase
 done
 ```
+
+For fix 3, same procedure against the fix-2 commit with the
+`confirmation_*` tests.
 
 The `master` run must show the reproduction tests failing; if it ever passes
 on a Qt version where it is expected to fail, the test has stopped testing

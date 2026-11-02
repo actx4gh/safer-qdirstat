@@ -243,20 +243,36 @@ namespace QDirStat
 	/**
 	 * Ask user for confirmation to execute a cleanup action for
 	 * 'items'. Returns 'true' if user accepts, 'false' otherwise.
+	 *
+	 * All directories are listed (long lists in the details pane), files
+	 * are cut to a few with a count, nested selections are flagged, the
+	 * scan root is marked, and the default button is "No".
 	 **/
 	bool confirmation( Cleanup * cleanup, const FileInfoSet & items );
 
 	/**
-	 * Return the URLs for the selected item types in 'items':
-	 * Directories, non-directories, or both.
-	 *
-	 * 'extraHighlight' indicates that some very strong extra highlighting
-	 * should be done to mark directories.
+	 * Return one HTML line for 'item' in the confirmation dialog: the
+	 * escaped URL, with a "Directory" label if 'dirLabel' is set, and a
+	 * red "SCAN ROOT" marker if the item is a toplevel item.
 	 **/
-	QStringList filteredUrls( const FileInfoSet & items,
-				  bool		      dirs,
-				  bool		      nonDirs,
-				  bool		      extraHighlight = false ) const;
+	static QString confirmationLine( FileInfo * item, bool dirLabel );
+
+	/**
+	 * Return 'true' if 'item' is a toplevel item (direct child of the
+	 * tree's internal root); same test as DirTree::isToplevel().
+	 **/
+	static bool isToplevelItem( const FileInfo * item );
+
+	/**
+	 * Sort predicate: by URL.
+	 **/
+	static bool urlLessThan( const FileInfo * a, const FileInfo * b );
+
+	/**
+	 * "1 directory" / "N directories", "1 file" / "N files".
+	 **/
+	static QString dirCount ( int n );
+	static QString fileCount( int n );
 
 	/**
 	 * Update all menus that have the 'keepUpdated' flag set.

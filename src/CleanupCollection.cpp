@@ -7,6 +7,8 @@
  */
 
 
+#include <algorithm>
+
 #include <QMenu>
 #include <QToolBar>
 #include <QMessageBox>
@@ -24,7 +26,9 @@
 #include "Logger.h"
 #include "Exception.h"
 
-#define MAX_URLS_IN_CONFIRMATION_POPUP 7
+#define MAX_URLS_IN_CONFIRMATION_POPUP 7	// files only; directories are never cut
+#define MAX_DIRS_IN_CONFIRMATION_TEXT 25	// more than this: complete list in the details pane
+#define DIRS_SHOWN_IF_MORE	       10	// ... and this many in the main text
 
 using namespace QDirStat;
 
@@ -354,11 +358,7 @@ FileInfoSet CleanupCollection::toplevelItems( const FileInfoSet & selection )
 
     foreach ( FileInfo * item, selection )
     {
-	// Same test as DirTree::isToplevel(): a direct child of the tree's
-	// internal root. Not going through item->tree() so this also works
-	// for items whose tree pointer is not set.
-
-	if ( item && item->parent() && ! item->parent()->parent() )
+	if ( isToplevelItem( item ) )
 	    toplevels << item;
     }
 
@@ -447,89 +447,190 @@ void CleanupCollection::reportToplevelRefusal( const QString     & actionTitle,
 
 bool CleanupCollection::confirmation( Cleanup * cleanup, const FileInfoSet & items )
 {
-    QString msg = "<html>";
+    //
+    // Rules (see https://github.com/shundhammer/qdirstat/issues/329):
+    //
+    // - Directories are listed first, each on its own line, never truncated.
+    //   Only files are cut to MAX_URLS_IN_CONFIRMATION_POPUP, with a count of
+    //   what was left out. A long directory list moves, complete, into the
+    //   dialog's details pane; the main text keeps the count and the first
+    //   few.
+    // - The counts are stated up front ("3 directories and 2 files").
+    // - A selection that contains a directory and items inside it is flagged:
+    //   that is what an unintended Shift range looks like.
+    // - The scan root is marked if it reaches this dialog (only possible as
+    //   the single item of a RefreshThis cleanup, see the scan root guard).
+    // - The default button and the Escape button are both "No". Enter never
+    //   confirms.
+    //
+    // URLs are HTML-escaped in the main text (it is HTML) and raw in the
+    // details pane (it is plain text).
+    //
+
     QString title = cleanup->cleanTitle();
+    QString msg   = "<html>" + tr( "<h3>%1</h3>" ).arg( title.toHtmlEscaped() );
+    QString details;
+
+    QList<FileInfo *> dirs;
+    QList<FileInfo *> files;
+
+    foreach ( FileInfo * item, items )
+    {
+	if ( item->isDirInfo() )
+	    dirs << item;
+	else
+	    files << item;
+    }
+
+    std::sort( dirs.begin(),  dirs.end(),  urlLessThan );
+    std::sort( files.begin(), files.end(), urlLessThan );
 
     if ( items.size() == 1 ) // The most common case
     {
 	FileInfo * item = items.first();
 
-	if ( item->isDir() || item->isPseudoDir() )
-	    msg += tr( "<h3>%1</h3>for <b>directory</b> %2" ).arg( title ).arg( item->url() );
+	if ( item->isDirInfo() )
+	    msg += tr( "for <b>directory</b> %1" ).arg( confirmationLine( item, false ) );
 	else
-	    msg += tr( "<h3>%1</h3>for file %2" ).arg( title ).arg( item->url() );
+	    msg += tr( "for file %1" ).arg( confirmationLine( item, false ) );
 
 	msg += "<br>";
     }
     else // Multiple items selected
     {
+	QString counts;
 
-	QStringList urls;
-	bool isMixed = items.containsDir() && items.containsFile();
+	if ( ! dirs.isEmpty() && ! files.isEmpty() )
+	    counts = tr( "%1 and %2" ).arg( dirCount( dirs.size() ) ).arg( fileCount( files.size() ) );
+	else if ( ! dirs.isEmpty() )
+	    counts = dirCount( dirs.size() );
+	else
+	    counts = fileCount( files.size() );
 
-	if ( isMixed )
+	msg += tr( "<p>for %1:</p>" ).arg( counts );
+
+	QStringList lines;
+
+	// Directories: all of them, either here or in the details pane
+
+	bool dirsInDetails = dirs.size() > MAX_DIRS_IN_CONFIRMATION_TEXT;
+	int	 dirsShown     = dirsInDetails ? DIRS_SHOWN_IF_MORE : dirs.size();
+
+	for ( int i = 0; i < dirsShown; ++i )
+	    lines << confirmationLine( dirs.at( i ), true );
+
+	if ( dirsInDetails )
 	{
-	    QStringList dirs	= filteredUrls( items, true, false,    // dibs, nonDirs
-						true );		       // extraHighlight
-	    QStringList nonDirs = filteredUrls( items, false, true  ); // dirs, nonDirs
+	    lines << tr( "<i>... %1 more; all %2 are listed under \"Show Details\"</i>" )
+		.arg( dirs.size() - dirsShown )
+		.arg( dirCount( dirs.size() ) );
 
-	    dirs    = dirs.mid	 ( 0, MAX_URLS_IN_CONFIRMATION_POPUP );
-	    nonDirs = nonDirs.mid( 0, MAX_URLS_IN_CONFIRMATION_POPUP );
+	    details += dirCount( dirs.size() ) + ":\n";
 
-	    urls << dirs << "" << nonDirs;
+	    foreach ( FileInfo * dir, dirs )
+		details += "  " + dir->url() + ( isToplevelItem( dir ) ? tr( "   [SCAN ROOT]" ) : QString() ) + "\n";
 	}
-	else // ! isMixed
+
+	// Files: the first few, then a count
+
+	if ( ! files.isEmpty() )
 	{
-	    // Build a list of the first couple of selected items (7 max)
+	    if ( ! dirs.isEmpty() )
+		lines << "";
 
-	    urls = filteredUrls( items, true, true ); // dirs, nonDirs
-	    urls = urls.mid( 0, MAX_URLS_IN_CONFIRMATION_POPUP );
+	    int filesShown = qMin( files.size(), (int) MAX_URLS_IN_CONFIRMATION_POPUP );
+
+	    for ( int i = 0; i < filesShown; ++i )
+		lines << confirmationLine( files.at( i ), false );
+
+	    if ( filesShown < files.size() )
+	    {
+		int more = files.size() - filesShown;
+
+		lines << ( more == 1 ? tr( "<i>... 1 more file</i>" )
+				     : tr( "<i>... %1 more files</i>" ).arg( more ) );
+	    }
+
+	    if ( dirsInDetails )
+	    {
+		details += "\n" + fileCount( files.size() ) + ":\n";
+
+		foreach ( FileInfo * file, files )
+		    details += "  " + file->url() + "\n";
+	    }
 	}
 
-	if ( urls.size() < items.size() ) // Only displaying part of the items?
+	msg += lines.join( "<br>" );
+
+	// Nested selection: a directory and items inside it
+
+	if ( items.normalized().size() != items.size() )
 	{
-	    urls << "...";
-	    urls << tr( "<i>(%1 items total)</i>" ).arg( items.size() );
+	    msg += tr( "<p><b>The selection contains a directory and items inside "
+		       "that directory.</b><br>"
+		       "Check that this is the intended selection: a Shift-click "
+		       "range may include rows that are scrolled out of view.</p>" );
 	}
-
-	msg += tr( "<h3>%1</h3> for:<br>\n%2<br>" ).arg( title ).arg( urls.join( "<br>" ) );
     }
 
-    int ret = QMessageBox::question( qApp->activeWindow(),
-				     tr( "Please Confirm" ), // title
-				     msg,		     // text
-				     QMessageBox::Yes | QMessageBox::No );
-    return ret == QMessageBox::Yes;
+    QMessageBox box( QMessageBox::Warning,
+		     tr( "Please Confirm" ),
+		     msg,
+		     QMessageBox::Yes | QMessageBox::No,
+		     qApp->activeWindow() );
+
+    box.setObjectName( "cleanupConfirmation" );
+    box.setDefaultButton( QMessageBox::No );
+    box.setEscapeButton ( QMessageBox::No );
+
+    if ( ! details.isEmpty() )
+	box.setDetailedText( details );
+
+    return box.exec() == QMessageBox::Yes;
 }
 
 
-QStringList CleanupCollection::filteredUrls( const FileInfoSet & items,
-					     bool		 dirs,
-					     bool		 nonDirs,
-					     bool		 extraHighlight ) const
+QString CleanupCollection::confirmationLine( FileInfo * item, bool dirLabel )
 {
-    QStringList urls;
+    QString line;
 
-    for ( FileInfoSet::const_iterator it = items.begin(); it != items.end(); ++it )
-    {
-	if ( ( dirs    &&   (*it)->isDir() ) ||
-	     ( nonDirs && ! (*it)->isDir() )   )
-	{
-	    QString name = (*it)->url();
+    if ( dirLabel )
+	line = tr( "<b>Directory</b> " );
 
-	    if ( (*it)->isDir() )
-	    {
-		if ( extraHighlight )
-		    urls << tr( "<b>Directory <font color=blue>%1</font></b>" ).arg( name );
-		else
-		    urls << tr( "<b>Directory</b> %1" ).arg( name );
-	    }
-	    else
-		urls << name;
-	}
-    }
+    line += item->url().toHtmlEscaped();
 
-    return urls;
+    if ( isToplevelItem( item ) )
+	line += tr( " &nbsp;<b><font color=red>SCAN ROOT</font></b>" );
+
+    return line;
+}
+
+
+bool CleanupCollection::isToplevelItem( const FileInfo * item )
+{
+    // Same test as DirTree::isToplevel(): a direct child of the tree's
+    // internal root. Not going through item->tree() so this also works for
+    // items whose tree pointer is not set.
+
+    return item && item->parent() && ! item->parent()->parent();
+}
+
+
+bool CleanupCollection::urlLessThan( const FileInfo * a, const FileInfo * b )
+{
+    return a->url() < b->url();
+}
+
+
+QString CleanupCollection::dirCount( int n )
+{
+    return n == 1 ? tr( "1 directory" ) : tr( "%1 directories" ).arg( n );
+}
+
+
+QString CleanupCollection::fileCount( int n )
+{
+    return n == 1 ? tr( "1 file" ) : tr( "%1 files" ).arg( n );
 }
 
 
