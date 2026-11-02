@@ -30,6 +30,12 @@ LIBS        += -lz
 
 INCLUDEPATH += ../../src
 DEPENDPATH  += ../../src
+
+# Same warning switches as src/src.pro: the application sources are compiled
+# here as well, and newer GCC (16) reports upstream's DirInfo::locate() hiding
+# FileInfo::locate() in every unit otherwise.
+QMAKE_CXXFLAGS += -Wno-overloaded-virtual \
+                  -Wno-sfinae-incomplete
 MOC_DIR      = .moc
 OBJECTS_DIR  = .obj
 UI_DIR       = .ui
