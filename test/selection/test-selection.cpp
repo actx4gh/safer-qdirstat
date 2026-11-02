@@ -18,13 +18,18 @@
 #include <QAction>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStorageInfo>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QMessageBox>
 #include <QAbstractButton>
+#include <QUrl>
+
+#include <unistd.h>	// getuid()
 
 #include "MainWindow.h"
 #include "QDirStatApp.h"
@@ -187,6 +192,133 @@ private:
 };
 
 
+/**
+ * Remove the trash entry of fixture item 'absPath' from wherever
+ * QFile::moveToTrash() put it, so that a test which moves a fixture item to
+ * the trash (the Yes control, or any Move to Trash test on a tree without
+ * the confirmation) leaves nothing behind. Returns the trash directory the
+ * entry was found in, or an empty string.
+ *
+ * Where Qt puts it (qfilesystemengine_unix.cpp): Qt 6.4 uses the home trash
+ * ($XDG_DATA_HOME/Trash, under test mode ~/.qttest/share/Trash) when the
+ * item is on the home volume and $topdir/.Trash-$uid (or an admin-created
+ * $topdir/.Trash/$uid) of the item's volume otherwise, and records the
+ * absolute path in the .trashinfo file. Qt 6.8+ tries the home trash first,
+ * falls back to the volume's trash when the rename fails with EXDEV, and
+ * records the path percent-encoded, relative to the volume root when the
+ * volume's trash is used. All of that is matched here; only entries whose
+ * recorded path is 'absPath' are touched, and the fixture path is unique
+ * per run.
+ **/
+static QString removeFromTrash( const QString & absPath )
+{
+    QString	 parent = QFileInfo( absPath ).absolutePath();	// the item itself is gone
+    QStorageInfo volume( parent );
+    QString	 rootPath = volume.rootPath();
+    QString	 uid	  = QString::number( getuid() );
+
+    // Qt 6.8+ records the path relative to the volume root when it uses the
+    // volume's trash; for the root volume that is the absolute path again.
+    QString relPath = absPath;
+
+    if ( rootPath.size() > 1 && absPath.startsWith( rootPath + "/" ) )
+	relPath = absPath.mid( rootPath.size() + 1 );
+
+    QStringList candidates;
+    candidates << QStandardPaths::writableLocation( QStandardPaths::GenericDataLocation ) + "/Trash";
+
+    if ( ! rootPath.isEmpty() )
+    {
+	candidates << rootPath + "/.Trash-" + uid
+		   << rootPath + "/.Trash/" + uid;
+    }
+
+    foreach ( const QString & trash, candidates )
+    {
+	QDir infoDir( trash + "/info" );
+
+	if ( ! infoDir.exists() )
+	    continue;
+
+	bool found = false;
+
+	foreach ( const QString & infoName, infoDir.entryList( QStringList() << "*.trashinfo", QDir::Files ) )
+	{
+	    QFile infoFile( infoDir.filePath( infoName ) );
+
+	    if ( ! infoFile.open( QIODevice::ReadOnly | QIODevice::Text ) )
+		continue;
+
+	    QString recorded;
+
+	    foreach ( const QByteArray & line, infoFile.readAll().split( '\n' ) )
+	    {
+		if ( line.startsWith( "Path=" ) )
+		{
+		    recorded = QUrl::fromPercentEncoding( line.mid( 5 ) );
+		    break;
+		}
+	    }
+
+	    infoFile.close();
+
+	    if ( recorded != absPath && recorded != relPath )
+		continue;
+
+	    QString stem    = infoName.left( infoName.size() - QString( ".trashinfo" ).size() );
+	    QString trashed = trash + "/files/" + stem;
+
+	    if ( QFileInfo( trashed ).isDir() )
+		QDir( trashed ).removeRecursively();
+	    else
+		QFile::remove( trashed );
+
+	    infoFile.remove();
+	    found = true;
+	}
+
+	if ( found )
+	    return trash;
+    }
+
+    return QString();
+}
+
+
+/**
+ * Clean up after a test that may move fixture items to the trash: on
+ * destruction, remove the trash entry of every listed item that no longer
+ * exists at its fixture path. Items still in place were not trashed and are
+ * left alone, so this is a no-op on the tree with the confirmation when the
+ * test declines, and a cleanup on a tree without it. Runs even if the test
+ * fails halfway (QTest macros return from the test function).
+ **/
+class TrashGuard
+{
+public:
+    explicit TrashGuard( const QStringList & absPaths ): _paths( absPaths ) {}
+
+    ~TrashGuard()
+    {
+	foreach ( const QString & path, _paths )
+	{
+	    if ( QFileInfo::exists( path ) )
+		continue;
+
+	    QString trash = removeFromTrash( path );
+
+	    if ( trash.isEmpty() )
+		qWarning( "No trash entry found for %s; remove it from the trash by hand", qPrintable( path ) );
+	    else
+		qInfo( "Removed %s from the trash at %s", qPrintable( path ), qPrintable( trash ) );
+	}
+    }
+
+private:
+    QStringList _paths;
+};
+
+
 class TestSelection: public QObject
 {
     Q_OBJECT
@@ -228,6 +360,11 @@ private slots:
     void confirmation_flagsNestedSelection();
     void confirmation_marksScanRoot();
     void confirmation_yesRunsCleanup();
+
+    // Move to Trash confirmation (fix 4)
+    void moveToTrash_asksForConfirmationAndDefaultsToNo();
+    void moveToTrash_enterDoesNotConfirm();
+    void moveToTrash_yesMovesToTrash();
 
 
 private:
@@ -272,6 +409,7 @@ private:
     QString	  marker( const QString & relPath ) const;	// marker file for a fixture item
     void	  select( const QStringList & relPaths );	// via SelectionModel::setSelectedItems()
     void	  waitForRefresh( QSignalSpy & finished );	// a cleanup's Refresher re-read
+    void	  activateMainWindow();			// MainWindow::moveToTrash() checks the active window
 
     QTemporaryDir   _tmp;
     QString	    _markerDir;
@@ -710,6 +848,15 @@ void TestSelection::waitForRefresh( QSignalSpy & finished )
 }
 
 
+void TestSelection::activateMainWindow()
+{
+    // MainWindow::moveToTrash() refuses to run unless the main window (or a
+    // LocateFilesWindow) is the active window.
+    _win->activateWindow();
+    QTRY_COMPARE( QApplication::activeWindow(), static_cast<QWidget *>( _win ) );
+}
+
+
 //
 // Tests: reproduction of upstream issue #329
 //
@@ -1048,12 +1195,14 @@ void TestSelection::deleteCleanup_runsWithoutToplevel()
 
 void TestSelection::moveToTrash_refusesToplevel()
 {
-    // MainWindow::moveToTrash() is not a Cleanup, has no confirmation
-    // dialog, and first checks that the active window is the main window.
-    _win->activateWindow();
-    QTRY_COMPARE( QApplication::activeWindow(), static_cast<QWidget *>( _win ) );
-
+    // MainWindow::moveToTrash() is not a Cleanup; the guard comes before its
+    // confirmation dialog (fix 4), so a refusal shows the refusal box only.
+    CHECKED( activateMainWindow() );
     CHECKED( select( QStringList() << "" << "C_target/f01" ) );
+
+    // Without the guard, this moves the whole fixture directory to the
+    // trash; the guard object takes it out again at the end of the test.
+    TrashGuard trashGuard( QStringList() << absPath( "" ) );
 
     DialogCatcher dialog;
     QVERIFY( QMetaObject::invokeMethod( _win, "moveToTrash", Qt::DirectConnection ) );
@@ -1252,6 +1401,119 @@ void TestSelection::confirmation_yesRunsCleanup()
 
 
 //
+// Tests: Move to Trash confirmation (fix 4)
+//
+// MainWindow::moveToTrash() is not a Cleanup and had no confirmation at all:
+// Del on a selection went straight to QFile::moveToTrash() per item. It now
+// shows the fix-3 dialog ("cleanupConfirmation") for every selection. Without
+// the fix the two declining tests fail on the behaviour: the items are gone.
+// Every test here cleans its items out of the trash again (TrashGuard), so a
+// run against an unfixed tree leaves nothing behind either.
+//
+
+void TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo()
+{
+    CHECKED( activateMainWindow() );
+    CHECKED( select( QStringList() << "D_dir" << "C_target/f11" << "C_target/f12" ) );
+
+    QAction * action = _win->findChild<QAction *>( "actionMoveToTrash" );
+    QVERIFY( action );
+    QVERIFY( action->isEnabled() );
+
+    TrashGuard trashGuard( QStringList() << absPath( "D_dir" ) << absPath( "C_target/f11" ) << absPath( "C_target/f12" ) );
+    QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+    DialogCatcher dialog;			// Escape
+    QVERIFY( QMetaObject::invokeMethod( _win, "moveToTrash", Qt::DirectConnection ) );
+
+    // Behaviour first: nothing was moved
+    QVERIFY2( QFileInfo::exists( absPath( "D_dir" ) ),	    "D_dir was moved to the trash without confirmation" );
+    QVERIFY2( QFileInfo::exists( absPath( "C_target/f11" ) ), "f11 was moved to the trash without confirmation" );
+    QVERIFY2( QFileInfo::exists( absPath( "C_target/f12" ) ), "f12 was moved to the trash without confirmation" );
+
+    // The dialog is the cleanup confirmation, for the selection as made
+    QCOMPARE( dialog.count(), 1 );
+    QCOMPARE( dialog.objectName(), QString( "cleanupConfirmation" ) );
+    QString text = dialog.text();
+    QVERIFY2( text.contains( "Move to Trash" ), qPrintable( text ) );
+    QVERIFY2( text.contains( "1 directory and 2 files" ), qPrintable( text ) );
+    QVERIFY2( text.contains( find( "D_dir" )->url().toHtmlEscaped() ), qPrintable( text ) );
+    QVERIFY2( text.contains( find( "C_target/f11" )->url().toHtmlEscaped() ), qPrintable( text ) );
+    QVERIFY2( text.contains( find( "C_target/f12" )->url().toHtmlEscaped() ), qPrintable( text ) );
+    QVERIFY2( ! text.contains( "inside that directory" ), qPrintable( text ) );
+    QCOMPARE( dialog.defaultButton(), QMessageBox::No );
+    QCOMPARE( dialog.icon(), QMessageBox::Warning );
+
+    // No refresh was started, the selection is untouched
+    QTest::qWait( 300 );
+    QCOMPARE( finished.count(), 0 );
+    QVERIFY( ! app()->dirTree()->isBusy() );
+    COMPARE_SELECTION( sorted( QStringList() << "D_dir" << "C_target/f11" << "C_target/f12" ) );
+    QVERIFY( find( "C_target/f12" ) );
+}
+
+
+void TestSelection::moveToTrash_enterDoesNotConfirm()
+{
+    CHECKED( activateMainWindow() );
+    CHECKED( select( QStringList() << "C_target" << "C_target/f10" ) );
+
+    // Without the dialog, the normalized selection (C_target) is trashed.
+    TrashGuard trashGuard( QStringList() << absPath( "C_target" ) );
+    DialogCatcher dialog( Qt::Key_Return );
+    QVERIFY( QMetaObject::invokeMethod( _win, "moveToTrash", Qt::DirectConnection ) );
+
+    QTest::qWait( 500 );
+    QVERIFY2( QFileInfo::exists( absPath( "C_target" ) ),	    "C_target was moved to the trash (no dialog, or Enter confirmed it)" );
+    QVERIFY2( QFileInfo::exists( absPath( "C_target/f10" ) ), "f10 was moved to the trash (no dialog, or Enter confirmed it)" );
+
+    QCOMPARE( dialog.count(), 1 );
+    QCOMPARE( dialog.objectName(), QString( "cleanupConfirmation" ) );
+    QCOMPARE( dialog.defaultButton(), QMessageBox::No );
+
+    // A directory together with an item inside it: flagged, as for a cleanup
+    QString text = dialog.text();
+    QVERIFY2( text.contains( "1 directory and 1 file" ), qPrintable( text ) );
+    QVERIFY2( text.contains( "inside that directory" ), qPrintable( text ) );
+}
+
+
+void TestSelection::moveToTrash_yesMovesToTrash()
+{
+    // Control: Yes moves the item to the trash, the parent is refreshed and
+    // the item is gone from the tree. Passes on every tree (without the
+    // dialog the item is simply moved). The file is restored afterwards and
+    // its trash entry removed, so the fixture is as before.
+    CHECKED( activateMainWindow() );
+    CHECKED( select( QStringList() << "C_target/f12" ) );
+
+    QString f12 = absPath( "C_target/f12" );
+    QSignalSpy finished( app()->dirTree(), SIGNAL( finished() ) );
+    DialogCatcher dialog( QMessageBox::Yes );
+    QVERIFY( QMetaObject::invokeMethod( _win, "moveToTrash", Qt::DirectConnection ) );
+
+    QTRY_VERIFY_WITH_TIMEOUT( ! QFileInfo::exists( f12 ), 5000 );
+    CHECKED( waitForRefresh( finished ) );	// Refresher::parents(): C_target is re-read
+    QVERIFY( ! find( "C_target/f12" ) );
+    QVERIFY( find( "C_target/f11" ) );
+    qInfo( "confirmation dialogs shown: %d", dialog.count() );	// 1 with fix 4, 0 without
+
+    QString trash = removeFromTrash( f12 );
+
+    if ( trash.isEmpty() )
+	qWarning( "No trash entry found for %s; remove it from the trash by hand", qPrintable( f12 ) );
+    else
+	qInfo( "f12 was in the trash at %s", qPrintable( trash ) );
+
+    // Restore the fixture for whatever runs after this test in the same process
+    QVERIFY( writeFile( f12, 2 * 10 * 1024 ) );
+    CHECKED( select( QStringList() << "" ) );
+    CHECKED( refreshSelectedAndWait() );
+    CHECKED( expandFixture() );
+    QVERIFY( find( "C_target/f12" ) );
+}
+
+
+//
 // main
 //
 
@@ -1262,6 +1524,13 @@ int main( int argc, char * argv[] )
     QStandardPaths::setTestModeEnabled( true );
     QSettings::setPath( QSettings::NativeFormat, QSettings::UserScope, configDir.path() );
     QSettings::setPath( QSettings::IniFormat,    QSettings::UserScope, configDir.path() );
+
+    // The home trash under test mode is ~/.qttest/share/Trash. Qt 6.4's
+    // QFile::moveToTrash() creates only the Trash/ level; if ~/.qttest/share
+    // does not exist it ends up with an empty trash path, QDir("") is the
+    // current directory, and the item is moved to ./files/ there (verified
+    // with 6.4.2). Qt 6.8+ fails cleanly instead. Either way: make it exist.
+    QDir().mkpath( QStandardPaths::writableLocation( QStandardPaths::GenericDataLocation ) );
 
     QCoreApplication::setOrganizationName( "QDirStat" );
     QCoreApplication::setApplicationName ( "QDirStat" );

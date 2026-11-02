@@ -267,7 +267,7 @@ void CleanupCollection::execute()
 	return;
     }
 
-    if ( cleanup->askForConfirmation() && ! confirmation( cleanup, selection ) )
+    if ( cleanup->askForConfirmation() && ! confirmation( cleanup->cleanTitle(), selection ) )
     {
 	logDebug() << "User declined confirmation" << endl;
 	return;
@@ -449,7 +449,7 @@ void CleanupCollection::reportToplevelRefusal( const QString     & actionTitle,
 }
 
 
-bool CleanupCollection::confirmation( Cleanup * cleanup, const FileInfoSet & items )
+bool CleanupCollection::confirmation( const QString & actionTitle, const FileInfoSet & items )
 {
     //
     // Rules (see https://github.com/shundhammer/qdirstat/issues/329):
@@ -470,9 +470,11 @@ bool CleanupCollection::confirmation( Cleanup * cleanup, const FileInfoSet & ite
     // URLs are HTML-escaped in the main text (it is HTML) and raw in the
     // details pane (it is plain text).
     //
+    // Used by execute() for cleanups that ask for confirmation and by
+    // MainWindow::moveToTrash(), which always asks.
+    //
 
-    QString title = cleanup->cleanTitle();
-    QString msg   = "<html>" + tr( "<h3>%1</h3>" ).arg( title.toHtmlEscaped() );
+    QString msg = "<html>" + tr( "<h3>%1</h3>" ).arg( actionTitle.toHtmlEscaped() );
     QString details;
 
     QList<FileInfo *> dirs;
