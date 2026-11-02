@@ -1,0 +1,133 @@
+# CI for the safer-qdirstat fork.
+#
+# Two jobs, each over a Qt matrix:
+#
+#   build-and-test     builds the application and test/selection from the
+#                      pushed ref and runs the suite (must pass).
+#
+#   evidence-on-master builds test/selection from the pushed ref against the
+#                      src/ of 'master' (the untouched upstream mirror) and
+#                      runs test/selection/evidence.sh, which checks that the
+#                      tests covering the fixes FAIL there and the controls
+#                      pass. If upstream ever fixes the issue itself, or a
+#                      test stops testing the mechanism, this job is what
+#                      notices.
+#
+# Qt 6.4 is the unconditional reproduction target (no anchor re-sync in
+# QAbstractItemView). The second entry is a current release; bump it when a
+# new one appears. install-qt-action accepts a SimpleSpec such as '6.*' too.
+
+name: CI
+
+on:
+  push:
+    branches: [ safer ]
+  pull_request:
+    branches: [ safer ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: safer, Qt ${{ matrix.qt }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - qt: '6.4.3'
+            arch: gcc_64
+          - qt: '6.10.0'
+            arch: linux_gcc_64
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Qt ${{ matrix.qt }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ matrix.qt }}
+          arch: ${{ matrix.arch }}
+          modules: qt5compat
+          cache: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zlib1g-dev libgl-dev
+
+      - name: Configure
+        run: qmake qdirstat.pro
+
+      - name: Build application and tests
+        run: make -j"$(nproc)"
+
+      - name: Run test/selection
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./test/selection/test-selection -o "junit-qt${{ matrix.qt }}.xml,junitxml" -o -,txt
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-safer-qt${{ matrix.qt }}
+          path: junit-*.xml
+          if-no-files-found: ignore
+
+  evidence-on-master:
+    name: evidence on master, Qt ${{ matrix.qt }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - qt: '6.4.3'
+            arch: gcc_64
+          - qt: '6.10.0'
+            arch: linux_gcc_64
+
+    steps:
+      - name: Check out the pushed ref (tests)
+        uses: actions/checkout@v4
+        with:
+          path: safer
+
+      - name: Check out master (upstream mirror, unfixed src/)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          path: master
+
+      - name: Install Qt ${{ matrix.qt }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ matrix.qt }}
+          arch: ${{ matrix.arch }}
+          modules: qt5compat
+          cache: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zlib1g-dev libgl-dev
+
+      - name: Build the tests against master's src/
+        run: |
+          cp -a safer/test/selection master/test/
+          mkdir build
+          cd build
+          qmake ../master/test/selection/selection.pro
+          make -j"$(nproc)"
+
+      - name: Check that the fixes' tests fail on master
+        env:
+          QT_QPA_PLATFORM: offscreen
+          VERBOSE: "1"
+        run: sh safer/test/selection/evidence.sh build/test-selection "${{ matrix.qt }}"
