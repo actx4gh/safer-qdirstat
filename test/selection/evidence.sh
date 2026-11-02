@@ -19,8 +19,14 @@
 #   FAIL   must fail on every Qt version
 #   FAIL<6.8  must fail below Qt 6.8; from 6.8 on QAbstractItemView re-syncs
 #          its anchor in currentChanged() when no Shift is reported, so the
-#          plain-click reproductions may pass there (recorded, not asserted)
+#          plain-click reproductions pass there (recorded, not asserted;
+#          verified: FAIL on 6.4.2, PASS on 6.12.0)
 #   PASS   control: must pass on every tree, fixed or not
+#
+# The Shift-held and Shift-drag reproductions are FAIL on every version: the
+# re-sync is skipped while Shift is reported, and the drag selection is built
+# from the private press position, which the re-sync never touches
+# (verified: FAIL on 6.4.2 and 6.12.0).
 #
 # The Qt version is taken from the first test's output unless given.
 #
@@ -43,7 +49,7 @@ TABLE='
 # fix 1: Shift range anchor
 shiftClickAfterTreemapClick_filesOnly                      FAIL<6.8
 shiftClickAfterTreemapClick_shiftHeldDuringTreemapClick    FAIL
-shiftDragAfterTreemapClick_filesOnly                       FAIL<6.8
+shiftDragAfterTreemapClick_filesOnly                       FAIL
 shiftClickOnIndentationAfterTreemapClick_filesOnly         FAIL<6.8
 shiftClickAfterProgrammaticCurrent_filesOnly               FAIL<6.8
 shiftDownRepeated_growsFromAnchor                          PASS

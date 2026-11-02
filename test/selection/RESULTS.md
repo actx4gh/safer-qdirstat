@@ -9,8 +9,8 @@ sync when the matrix changes.
 | Qt    | platform          | master                                   | safer      |
 |-------|-------------------|------------------------------------------|------------|
 | 6.4.2 | Ubuntu 24.04, offscreen | fix 1 tests on master: 6 FAIL, 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS; fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS |
-| 6.8.x | not yet run       | expected: `*_filesOnly` pass (anchor re-sync), `*_shiftHeldDuringTreemapClick` FAIL; fix 2 and fix 3 tests FAIL as on 6.4 | expected 26 PASS |
-| 6.12.0 | Linux, GCC 16, offscreen (local build) | fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS. master and fix-1-only trees: not yet run (`evidence.sh`) | 26 PASS |
+| 6.12.0 | Linux, GCC 16, offscreen (local build) | `evidence.sh` on master: 24 tests, 0 unexpected. Plain-click reproductions (`shiftClickAfterTreemapClick_filesOnly`, `shiftClickOnIndentation...`, `shiftClickAfterProgrammaticCurrent...`) PASS on master (anchor re-sync); `shiftHeldDuringTreemapClick` and `shiftDrag...filesOnly` FAIL; hidden anchor, all fix 2 and fix 3 tests FAIL; controls PASS. Fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS | 26 PASS |
+| 6.8.x, 6.10.x | not run locally; CI runs 6.10.0 | expected as 6.12 | expected 26 PASS |
 
 The tests named `*_filesOnly` and `*_shiftHeldDuringTreemapClick` are the
 reproduction of shundhammer/qdirstat#329. On `master` with Qt 6.4.2 every one
@@ -124,13 +124,53 @@ Totals: 26 passed, 0 failed, 0 skipped, 0 blacklisted, 4760ms
 ********* Finished testing of TestSelection *********
 ```
 
-## safer (fix 1 + fix 2 + fix 3), Qt 6.12.0
+## Qt 6.12.0 (local build: Linux, GCC 16, offscreen)
 
-Linux, GCC 16, offscreen. 26 passed, 0 failed, 4745 ms. Fix 3
-tests against the fix-2 tree on the same machine: 6 FAIL / 1 PASS, same
-assertions as on 6.4.2. The master run on 6.12 (`evidence.sh`) is the open
-item: it decides whether the three `FAIL<6.8` tests pass on master there, as
-the reading of QAbstractItemView::currentChanged() predicts.
+safer: 26 passed, 0 failed, 4725 ms. Fix 3 tests against the fix-2 tree:
+6 FAIL / 1 PASS, same assertions as on 6.4.2.
+
+master, `evidence.sh`, upstream `ed3478e`:
+
+```
+test                                                       expected  result  verdict
+----                                                       --------  ------  -------
+shiftClickAfterTreemapClick_filesOnly                      FAIL<6.8  PASS    recorded
+shiftClickAfterTreemapClick_shiftHeldDuringTreemapClick    FAIL      FAIL    ok
+shiftDragAfterTreemapClick_filesOnly                       FAIL<6.8  FAIL    recorded
+shiftClickOnIndentationAfterTreemapClick_filesOnly         FAIL<6.8  PASS    recorded
+shiftClickAfterProgrammaticCurrent_filesOnly               FAIL<6.8  PASS    recorded
+shiftDownRepeated_growsFromAnchor                          PASS      PASS    ok
+shiftDrag_growsAndShrinksFromAnchor                        PASS      PASS    ok
+ctrlClickThenShiftClick_keepsCommittedRange                PASS      PASS    ok
+shiftClickWithHiddenAnchor_isPlainClick                    FAIL      FAIL    ok
+shiftClickOnBranchIndicator_togglesExpansion               PASS      PASS    ok
+deleteCleanup_refusesToplevelInMultiSelection              FAIL      FAIL    ok
+deleteCleanup_refusesToplevelAlone                         FAIL      FAIL    ok
+assumeDeletedCleanup_refusesToplevelAlone                  FAIL      FAIL    ok
+refreshThisCleanup_allowsToplevelAlone_refusesWithOthers   FAIL      FAIL    ok
+noRefreshCleanup_allowsToplevelInMultiSelection            PASS      PASS    ok
+deleteCleanup_runsWithoutToplevel                          PASS      PASS    ok
+moveToTrash_refusesToplevel                                FAIL      FAIL    ok
+confirmation_listsAllDirectoriesAndDefaultsToNo            FAIL      FAIL    ok
+confirmation_enterDoesNotConfirm                           FAIL      FAIL    ok
+confirmation_filesAreCutWithACount                         FAIL      FAIL    ok
+confirmation_longDirectoryListGoesToDetails                FAIL      FAIL    ok
+confirmation_flagsNestedSelection                          FAIL      FAIL    ok
+confirmation_marksScanRoot                                 FAIL      FAIL    ok
+confirmation_yesRunsCleanup                                PASS      PASS    ok
+
+Qt 6.12.0: 24 tests, 0 unexpected
+```
+
+What this settles: from Qt 6.8 on, QAbstractItemView re-syncs its private
+anchor in currentChanged() when no Shift is reported, so a plain treemap
+click (or any programmatic current change made without Shift held) followed
+by a Shift-click behaves on master. Two paths stay broken on every Qt: the
+re-sync is skipped while Shift is reported (shiftHeld...), and a Shift+click
+with pointer motion before release selects from the private press position,
+which the re-sync never updates (shiftDrag...). After this run the drag test
+is `FAIL` unconditionally in the expectation table; this table was produced
+while it was still `FAIL<6.8`, which is why its row says "recorded".
 
 ## Fix 2: scan root guard
 
