@@ -35,8 +35,8 @@ Status: all four fixes have landed with their tests.
 Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
 patches as one commit per fix and is rebased onto upstream periodically.
 Regression tests live in `test/selection` (QTest, Qt 6, run with
-`QT_QPA_PLATFORM=offscreen make check`). CI builds and runs them on Qt 6.4
-and a current Qt 6, and a second job builds them against `master` and runs
+`QT_QPA_PLATFORM=offscreen make check`). CI builds and runs them on Qt 6.4,
+6.8, 6.10 and 6.12, and a second job builds them against `master` and runs
 `test/selection/evidence.sh`, which checks that the tests covering the fixes
 fail without them; `test/selection/RESULTS.md` records those runs.
 
