@@ -13,9 +13,13 @@
 #                      test stops testing the mechanism, this job is what
 #                      notices.
 #
-# Qt 6.4 is the unconditional reproduction target (no anchor re-sync in
-# QAbstractItemView). The second entry is a current release; bump it when a
-# new one appears. install-qt-action accepts a SimpleSpec such as '6.*' too.
+# Qt matrix: 6.4 is the unconditional reproduction target (no anchor re-sync
+# in QAbstractItemView); 6.8 is the first release with the re-sync; 6.10 and
+# 6.12 are current releases. Bump the last one when a new release appears
+# (check the mirror first: pip install aqtinstall && aqt list-qt linux
+# desktop). For 6.7 and later the arch is linux_gcc_64. install-qt-action
+# accepts a SimpleSpec such as '6.*' too; a pinned version is used here so a
+# red run means a change in the code, not in the mirror.
 
 name: CI
 
@@ -41,7 +45,11 @@ jobs:
         include:
           - qt: '6.4.3'
             arch: gcc_64
+          - qt: '6.8.3'
+            arch: linux_gcc_64
           - qt: '6.10.0'
+            arch: linux_gcc_64
+          - qt: '6.12.0'
             arch: linux_gcc_64
 
     steps:
@@ -90,7 +98,11 @@ jobs:
         include:
           - qt: '6.4.3'
             arch: gcc_64
+          - qt: '6.8.3'
+            arch: linux_gcc_64
           - qt: '6.10.0'
+            arch: linux_gcc_64
+          - qt: '6.12.0'
             arch: linux_gcc_64
 
     steps:
