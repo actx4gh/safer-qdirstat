@@ -15,9 +15,9 @@
 #      once more on safer so the branch has its own run. safer therefore
 #      never points at a state that has not passed CI.
 #
-# Anything failing (a rebase conflict, a red CI run, a leftover candidate
-# branch from an earlier failure, a lease that no longer holds) fails this
-# run, and the last step then disables this workflow, so there is no retry
+# Anything failing (a leftover candidate branch from an earlier failure,
+# checked first on every run; a rebase conflict; a red CI run; a lease that
+# no longer holds) fails this run, and the last step then disables this workflow, so there is no retry
 # the week after. The fast-forwarded master and the candidate branch are
 # left in place for inspection; the job summary says what to look at.
 # After fixing, delete the candidate branch and enable the workflow again
@@ -42,6 +42,11 @@
 #     is why ci.yml is dispatched explicitly.
 #   - Scheduled workflows run on the default branch only (safer).
 #
+# Every gh call names this repository (GH_REPO and --repo). Without that,
+# gh resolves the repository from the git remotes and prefers the remote
+# named "upstream", so the calls would be addressed to the upstream
+# repository and rejected. The git pushes name origin explicitly.
+#
 # workflow_dispatch is there for a manual run, for example right after
 # enabling, or with master set back one commit to exercise the whole path.
 
@@ -64,6 +69,7 @@ env:
   CANDIDATE: safer-rebase-candidate
   UPSTREAM_URL: https://github.com/shundhammer/qdirstat.git
   GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   watch:
@@ -77,6 +83,13 @@ jobs:
         with:
           ref: safer
           fetch-depth: 0
+
+      - name: Refuse to start while a candidate branch exists
+        run: |
+          if git ls-remote --exit-code --heads origin "$CANDIDATE" >/dev/null; then
+              echo "branch $CANDIDATE exists on origin: an earlier run failed and was not cleaned up" >&2
+              exit 1
+          fi
 
       - name: Compare master with upstream
         id: compare
@@ -93,14 +106,6 @@ jobs:
           else
               echo "moved=true" >> "$GITHUB_OUTPUT"
               echo "upstream moved: ${origin_master:0:7} -> ${upstream_master:0:7}" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Refuse to start while a candidate branch exists
-        if: steps.compare.outputs.moved == 'true'
-        run: |
-          if git ls-remote --exit-code --heads origin "$CANDIDATE" >/dev/null; then
-              echo "branch $CANDIDATE exists on origin: an earlier run failed and was not cleaned up" >&2
-              exit 1
           fi
 
       - name: Rebase safer onto upstream (scripts/sync-upstream.sh --no-build)
@@ -122,10 +127,10 @@ jobs:
       - name: Run ci.yml on the candidate and wait for it
         if: steps.compare.outputs.moved == 'true'
         run: |
-          gh workflow run ci.yml --ref "$CANDIDATE"
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$CANDIDATE"
           run_id=""
           for i in $(seq 1 30); do
-              run_id="$(gh run list --workflow ci.yml --branch "$CANDIDATE" --event workflow_dispatch \
+              run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch "$CANDIDATE" --event workflow_dispatch \
                             --limit 5 --json databaseId,headSha \
                             --jq ".[] | select(.headSha == \"$new_safer\") | .databaseId" | head -1)"
               [ -n "$run_id" ] && break
@@ -137,14 +142,14 @@ jobs:
           fi
           echo "ci_run_id=$run_id" >> "$GITHUB_ENV"
           echo "CI on the candidate: ${{ github.server_url }}/${{ github.repository }}/actions/runs/$run_id" | tee -a "$GITHUB_STEP_SUMMARY"
-          gh run watch "$run_id" --exit-status --interval 30
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30
 
       - name: Promote the candidate to safer
         if: steps.compare.outputs.moved == 'true'
         run: |
           git push --force-with-lease="safer:$old_safer" origin safer
           git push origin --delete "$CANDIDATE"
-          gh workflow run ci.yml --ref safer
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref safer
           {
               echo
               echo "safer: ${old_safer:0:7} -> ${new_safer:0:7}, rebased onto upstream $(git rev-parse --short=7 master); CI green on the candidate, dispatched again on safer."
@@ -163,4 +168,4 @@ jobs:
               echo "If it got that far: master is fast-forwarded (harmless, it is a mirror); the rebased safer is on branch $CANDIDATE; safer itself is unchanged."
               echo "To resume: fix or decide, delete branch $CANDIDATE, then enable the workflow again (Actions tab, or the REST API enable endpoint)."
           } >> "$GITHUB_STEP_SUMMARY"
-          gh workflow disable upstream-watch.yml
+          gh workflow disable upstream-watch.yml --repo "$GITHUB_REPOSITORY"
