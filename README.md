@@ -36,6 +36,9 @@ Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
 patches as one commit per fix and is rebased onto upstream periodically
 (`scripts/sync-upstream.sh`: fetch, fast-forward `master`, rebase `safer`,
 build and run the suite, then stop before the push).
+`.github/workflows/upstream-watch.yml` runs that unattended once a week:
+it moves `safer` only after the full CI matrix has passed on a candidate
+branch, and switches itself off on any failure instead of retrying.
 Regression tests live in `test/selection` (QTest, Qt 6, run with
 `QT_QPA_PLATFORM=offscreen make check`). CI builds and runs them on Qt 6.4,
 6.8, 6.10 and 6.12, and a second job builds them against `master` and runs
