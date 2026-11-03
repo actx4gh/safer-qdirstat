@@ -1,0 +1,166 @@
+# Upstream watch for the safer-qdirstat fork: the unattended version of
+# scripts/sync-upstream.sh.
+#
+# Once a week: fetch upstream. If origin/master already equals
+# upstream/master there is nothing to do. Otherwise:
+#
+#   1. scripts/sync-upstream.sh --no-build fast-forwards master and rebases
+#      safer onto it (refusing if master has commits of its own).
+#   2. master is pushed, and the rebased safer is pushed to the branch
+#      safer-rebase-candidate. safer itself is not touched yet.
+#   3. ci.yml is run on the candidate (the full Qt matrix, and the evidence
+#      job against the new master) and this job waits for the result.
+#   4. Green: safer is moved to the candidate with a lease on the head it
+#      had at the start, the candidate branch is deleted, and ci.yml is run
+#      once more on safer so the branch has its own run. safer therefore
+#      never points at a state that has not passed CI.
+#
+# Anything failing (a rebase conflict, a red CI run, a leftover candidate
+# branch from an earlier failure, a lease that no longer holds) fails this
+# run, and the last step then disables this workflow, so there is no retry
+# the week after. The fast-forwarded master and the candidate branch are
+# left in place for inspection; the job summary says what to look at.
+# After fixing, delete the candidate branch and enable the workflow again
+# (Actions tab, or PUT /repos/{owner}/{repo}/actions/workflows/upstream-watch.yml/enable).
+#
+# Who hears about it: GitHub sends scheduled-workflow notifications to the
+# user who created the workflow, or who last re-enabled it (the fork owner).
+# The workflow never opens an issue, pull request or comment anywhere; it
+# only fetches from upstream. The CI runs it dispatches are triggered by the
+# workflow token, so their results are reported through this run, not by
+# their own notifications.
+#
+# GitHub rules that apply (docs: "Events that trigger workflows",
+# "Disabling and enabling a workflow"):
+#   - In a fork, scheduled workflows are disabled by default: enable this
+#     one once after committing it.
+#   - In a public repository, scheduled workflows are disabled automatically
+#     after 60 days without repository activity. A rebase push counts; a
+#     quiet upstream and a quiet fork for 60 days switch the watch off, and
+#     it is enabled again the same way. This file does not work around that.
+#   - A push made with the workflow token does not trigger on: push, which
+#     is why ci.yml is dispatched explicitly.
+#   - Scheduled workflows run on the default branch only (safer).
+#
+# workflow_dispatch is there for a manual run, for example right after
+# enabling, or with master set back one commit to exercise the whole path.
+
+name: upstream-watch
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+env:
+  CANDIDATE: safer-rebase-candidate
+  UPSTREAM_URL: https://github.com/shundhammer/qdirstat.git
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  watch:
+    name: fetch upstream, rebase safer, run CI, promote
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out safer with full history
+        uses: actions/checkout@v4
+        with:
+          ref: safer
+          fetch-depth: 0
+
+      - name: Compare master with upstream
+        id: compare
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch -q upstream master
+          origin_master="$(git rev-parse origin/master)"
+          upstream_master="$(git rev-parse upstream/master)"
+          echo "origin/master   $origin_master"
+          echo "upstream/master $upstream_master"
+          if [ "$origin_master" = "$upstream_master" ]; then
+              echo "moved=false" >> "$GITHUB_OUTPUT"
+              echo "upstream unchanged at ${upstream_master:0:7}; nothing to do" >> "$GITHUB_STEP_SUMMARY"
+          else
+              echo "moved=true" >> "$GITHUB_OUTPUT"
+              echo "upstream moved: ${origin_master:0:7} -> ${upstream_master:0:7}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Refuse to start while a candidate branch exists
+        if: steps.compare.outputs.moved == 'true'
+        run: |
+          if git ls-remote --exit-code --heads origin "$CANDIDATE" >/dev/null; then
+              echo "branch $CANDIDATE exists on origin: an earlier run failed and was not cleaned up" >&2
+              exit 1
+          fi
+
+      - name: Rebase safer onto upstream (scripts/sync-upstream.sh --no-build)
+        if: steps.compare.outputs.moved == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "old_safer=$(git rev-parse origin/safer)" >> "$GITHUB_ENV"
+          scripts/sync-upstream.sh --no-build
+          echo "new_safer=$(git rev-parse safer)" >> "$GITHUB_ENV"
+
+      - name: Push master and the candidate
+        if: steps.compare.outputs.moved == 'true'
+        run: |
+          git push origin master
+          git push origin "safer:refs/heads/$CANDIDATE"
+          echo "master: $(git rev-parse --short=7 master); candidate $CANDIDATE: $(git rev-parse --short=7 safer)"
+
+      - name: Run ci.yml on the candidate and wait for it
+        if: steps.compare.outputs.moved == 'true'
+        run: |
+          gh workflow run ci.yml --ref "$CANDIDATE"
+          run_id=""
+          for i in $(seq 1 30); do
+              run_id="$(gh run list --workflow ci.yml --branch "$CANDIDATE" --event workflow_dispatch \
+                            --limit 5 --json databaseId,headSha \
+                            --jq ".[] | select(.headSha == \"$new_safer\") | .databaseId" | head -1)"
+              [ -n "$run_id" ] && break
+              sleep 10
+          done
+          if [ -z "$run_id" ]; then
+              echo "the dispatched ci.yml run on $CANDIDATE did not appear within five minutes" >&2
+              exit 1
+          fi
+          echo "ci_run_id=$run_id" >> "$GITHUB_ENV"
+          echo "CI on the candidate: ${{ github.server_url }}/${{ github.repository }}/actions/runs/$run_id" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh run watch "$run_id" --exit-status --interval 30
+
+      - name: Promote the candidate to safer
+        if: steps.compare.outputs.moved == 'true'
+        run: |
+          git push --force-with-lease="safer:$old_safer" origin safer
+          git push origin --delete "$CANDIDATE"
+          gh workflow run ci.yml --ref safer
+          {
+              echo
+              echo "safer: ${old_safer:0:7} -> ${new_safer:0:7}, rebased onto upstream $(git rev-parse --short=7 master); CI green on the candidate, dispatched again on safer."
+              echo
+              echo '```'
+              git log --oneline master..safer
+              echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: On failure, disable this workflow (no retry next week)
+        if: failure() || cancelled()
+        run: |
+          {
+              echo
+              echo "upstream-watch FAILED and disabled itself. Look at this run's log."
+              echo "If it got that far: master is fast-forwarded (harmless, it is a mirror); the rebased safer is on branch $CANDIDATE; safer itself is unchanged."
+              echo "To resume: fix or decide, delete branch $CANDIDATE, then enable the workflow again (Actions tab, or the REST API enable endpoint)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          gh workflow disable upstream-watch.yml
