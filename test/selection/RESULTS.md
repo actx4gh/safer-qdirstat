@@ -9,7 +9,7 @@ sync when the matrix changes.
 | Qt    | platform          | master                                   | safer      |
 |-------|-------------------|------------------------------------------|------------|
 | 6.4.2 | Ubuntu 24.04, offscreen | `evidence.sh` on master: 27 tests, 0 unexpected. Fix 1 tests on master: 6 FAIL, 6 PASS; fix 2 tests on the fix-1-only tree: 5 FAIL, 2 PASS; fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS; fix 4 tests on the fix-3 tree: 2 FAIL, 1 PASS | 29 PASS |
-| 6.12.0 | Linux, GCC 16, offscreen (local build) | `evidence.sh` on master: 24 tests, 0 unexpected before fix 4, 27 tests, 0 unexpected with fix 4's three rows. Plain-click reproductions (`shiftClickAfterTreemapClick_filesOnly`, `shiftClickOnIndentation...`, `shiftClickAfterProgrammaticCurrent...`) PASS on master (anchor re-sync); `shiftHeldDuringTreemapClick` and `shiftDrag...filesOnly` FAIL; hidden anchor, all fix 2, fix 3 and fix 4 tests FAIL; controls PASS. Fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS; fix 4 tests on the fix-3 tree: 2 FAIL, 1 PASS | 26 PASS before fix 4; the 29-test run is not recorded here yet |
+| 6.12.0 | Linux, GCC 16, offscreen (local build) | `evidence.sh` on master: 24 tests, 0 unexpected before fix 4, 27 tests, 0 unexpected with fix 4's three rows. Plain-click reproductions (`shiftClickAfterTreemapClick_filesOnly`, `shiftClickOnIndentation...`, `shiftClickAfterProgrammaticCurrent...`) PASS on master (anchor re-sync); `shiftHeldDuringTreemapClick` and `shiftDrag...filesOnly` FAIL; hidden anchor, all fix 2, fix 3 and fix 4 tests FAIL; controls PASS. Fix 3 tests on the fix-2 tree: 6 FAIL, 1 PASS; fix 4 tests on the fix-3 tree: 2 FAIL, 1 PASS | 29 PASS |
 | 6.4.3, 6.8.3, 6.10.0, 6.12.0 | CI, ubuntu-24.04, aqt (`.github/workflows/ci.yml`) | `evidence.sh` on master on every push (job `evidence-on-master`), must report 0 unexpected | full suite on every push (job `build-and-test`), must pass; see the Actions tab, run #5 is the first with all four columns |
 
 The tests named `*_filesOnly` and `*_shiftHeldDuringTreemapClick` are the
@@ -103,8 +103,10 @@ Totals: 29 passed, 0 failed, 0 skipped, 0 blacklisted, 5701ms
 
 ## Qt 6.12.0 (local build: Linux, GCC 16, offscreen)
 
-safer: 26 passed, 0 failed, 4725 ms. Fix 3 tests against the fix-2 tree:
-6 FAIL / 1 PASS, same assertions as on 6.4.2.
+safer with fixes 1 to 4: 29 passed, 0 failed, 5668 ms (the full run is
+quoted in the fix 4 section below). Before fix 4: 26 passed, 0 failed,
+4725 ms. Fix 3 tests against the fix-2 tree: 6 FAIL / 1 PASS, same
+assertions as on 6.4.2.
 
 master, `evidence.sh`, upstream `ed3478e`:
 
@@ -279,6 +281,16 @@ PASS   : TestSelection::moveToTrash_yesMovesToTrash()
 Both trash directories (`~/.qttest/share/Trash/files` and `/tmp/.Trash-<uid>/files`)
 were empty afterwards. `evidence.sh` on master, Qt 6.12.0, with the three new
 rows: 27 tests, 0 unexpected.
+
+Full suite on `safer` with fix 4, Qt 6.12.0, local build (same machine and
+compiler as above), filtered to the `QINFO`, `FAIL` and `Totals` lines; no
+`FAIL` line appeared. The control used the volume trash again:
+
+```
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() confirmation dialogs shown: 1
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() f12 was in the trash at /tmp/.Trash-<uid>
+Totals: 29 passed, 0 failed, 0 skipped, 0 blacklisted, 5668ms
+```
 
 ## How to regenerate
 
