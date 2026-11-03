@@ -33,7 +33,9 @@ Fixes carried on top of upstream `master`:
 Status: all four fixes have landed with their tests.
 
 Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
-patches as one commit per fix and is rebased onto upstream periodically.
+patches as one commit per fix and is rebased onto upstream periodically
+(`scripts/sync-upstream.sh`: fetch, fast-forward `master`, rebase `safer`,
+build and run the suite, then stop before the push).
 Regression tests live in `test/selection` (QTest, Qt 6, run with
 `QT_QPA_PLATFORM=offscreen make check`). CI builds and runs them on Qt 6.4,
 6.8, 6.10 and 6.12, and a second job builds them against `master` and runs
