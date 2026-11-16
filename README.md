@@ -29,8 +29,37 @@ Fixes carried on top of upstream `master`:
   with no confirmation at all; with the Del shortcut, a selection range that
   includes rows scrolled out of view is gone before it is seen. The fork
   shows the same confirmation dialog as for a cleanup, for every selection.
+- **No restricted mode.** Since November 2026 upstream answers a selection
+  that contains an item together with one of its ancestors with a warning
+  dialog, clears the selection and switches to a "restricted mode" until the
+  program is restarted: single selection only, cleanups that run `rm -rf`
+  and Move to Trash disabled. The fork keeps that code but does not connect
+  it. With the fixes above the unintended range is not selected in the first
+  place, the scan root is refused, and the confirmation dialog points out a
+  nested selection, so selecting a directory together with something inside
+  it remains the ordinary, harmless selection it has always been.
 
-Status: all four fixes have landed with their tests.
+Status: all five fixes have landed with their tests.
+
+Relation to upstream: this fork and upstream agree on the goal, nobody
+should lose a directory tree to a selection they did not mean to make, and
+differ on where the problem lies. Upstream's restricted mode treats the
+over-long Shift range as a mistake in how the program is used; its warning
+asks the user not to begin a selection with Shift or Ctrl. The tests here
+show a different origin: the range starts at `QAbstractItemView`'s private
+anchor, which stays behind whenever QDirStat moves the current item through
+the selection model, for example after a plain click in the treemap. That
+is a defect in how the tree view is driven, and it is still present in
+upstream `master`. Upstream's check does stop the worst outcome, a range
+that reaches up to the scan root, after the selection has been made. It
+cannot see a range that is too long but stays inside one directory, because
+no ancestor is involved (`shiftClickAfterTreeAndTreemapClick_fromCurrentOnly`
+and `shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly` reproduce that
+on `master`), and it also ends multi-selection for the session after a
+deliberate Ctrl+click on a directory and one of its children. With the
+anchor fixed, none of that machinery is needed. The patches are small,
+tested, and under the same license as the rest; upstream is welcome to any
+of them, and this fork would gladly become unnecessary.
 
 Branches: `master` mirrors upstream unchanged; `safer` (default) carries the
 patches as one commit per fix and is rebased onto upstream periodically

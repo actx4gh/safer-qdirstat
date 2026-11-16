@@ -11,6 +11,13 @@
  * The two tests named *_filesOnly and *_shiftHeldDuringTreemapClick are the
  * reproduction of upstream issue #329. They must FAIL on upstream master
  * (Qt < 6.8: both; Qt >= 6.8: the second one) and PASS on 'safer'.
+ *
+ * Since upstream commit c0eefcf ("restricted mode") upstream master opens a
+ * modal QDialog and restricts the rest of the program run whenever an item
+ * and one of its ancestors are selected together. The fork does not connect
+ * that (see MainWindow::connectSignals()). UpstreamRestrictedModeDialogCloser
+ * below exists for the evidence run against master only: it closes that
+ * dialog so a test fails on its assertions there instead of blocking.
  */
 
 #include <QtTest>
@@ -25,6 +32,7 @@
 #include <QStorageInfo>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QDialog>
 #include <QMessageBox>
 #include <QAbstractButton>
 #include <QUrl>
@@ -105,6 +113,52 @@ private:
     QTimer _timer;
     int    _closed = 0;
 };
+
+
+/**
+ * Close upstream's "dangerous selection" warning (a plain modal QDialog with
+ * the object name below, shown from MainWindow::showDangerousSelectionWarning()
+ * on upstream master) as soon as it opens, and count how often that happened.
+ *
+ * One instance lives in main() for the whole run. On 'safer' the dialog never
+ * opens and the count stays 0. On upstream master it opens whenever a test
+ * selects an item together with one of its ancestors; without this the
+ * dialog's exec() would block the test until QTest's watchdog aborts the
+ * process. DialogCatcher below handles QMessageBox only and leaves this
+ * dialog alone.
+ **/
+class UpstreamRestrictedModeDialogCloser: public QObject
+{
+    Q_OBJECT
+
+public:
+    UpstreamRestrictedModeDialogCloser()
+    {
+	connect( &_timer, &QTimer::timeout, this, &UpstreamRestrictedModeDialogCloser::poll );
+	_timer.start( 20 );
+    }
+
+    /** How often the dialog was closed since the start of the process. **/
+    static int closed() { return _closed; }
+
+private slots:
+    void poll()
+    {
+	QDialog * dialog = qobject_cast<QDialog *>( QApplication::activeModalWidget() );
+
+	if ( dialog && dialog->objectName() == "DangerousSelectionWarningDialog" )
+	{
+	    ++_closed;
+	    dialog->accept();
+	}
+    }
+
+private:
+    QTimer     _timer;
+    static int _closed;
+};
+
+int UpstreamRestrictedModeDialogCloser::_closed = 0;
 
 
 /**
@@ -335,6 +389,8 @@ private slots:
     void shiftDragAfterTreemapClick_filesOnly();
     void shiftClickOnIndentationAfterTreemapClick_filesOnly();
     void shiftClickAfterProgrammaticCurrent_filesOnly();
+    void shiftClickAfterTreeAndTreemapClick_fromCurrentOnly();
+    void shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly();
 
     // Stock behaviour that must be preserved
     void shiftDownRepeated_growsFromAnchor();
@@ -365,6 +421,9 @@ private slots:
     void moveToTrash_asksForConfirmationAndDefaultsToNo();
     void moveToTrash_enterDoesNotConfirm();
     void moveToTrash_yesMovesToTrash();
+
+    // No restricted mode (fix 5)
+    void ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted();
 
 
 private:
@@ -947,6 +1006,56 @@ void TestSelection::shiftClickAfterProgrammaticCurrent_filesOnly()
 }
 
 
+void TestSelection::shiftClickAfterTreeAndTreemapClick_fromCurrentOnly()
+{
+    // The stale anchor without any ancestor in the resulting range: the
+    // private anchor is a file in the same directory, set by an ordinary
+    // click in the tree. The treemap click then moves the current item nine
+    // rows down without moving that anchor. A Shift-click below it must
+    // select from the item the user sees as current (f10), not from the row
+    // clicked earlier (f01).
+    //
+    // No directory is involved, so a check for "an item and one of its
+    // ancestors are both selected" has nothing to detect here: on upstream
+    // master the range is f01 .. f12, nine files more than intended, with
+    // no warning (Qt < 6.8; from 6.8 on QAbstractItemView re-syncs its
+    // anchor for this plain-click sequence, see the next test for the
+    // sequence it does not cover).
+    CHECKED( treeClick( "C_target/f01", Qt::LeftButton ) );
+    COMPARE_SELECTION( files( 1, 1 ) );
+
+    CHECKED( treemapClick( "C_target/f10" ) );
+    COMPARE_SELECTION( files( 10, 10 ) );
+    QCOMPARE( _tree->currentIndex().sibling( _tree->currentIndex().row(), 0 ), idx( "C_target/f10" ) );
+
+    CHECKED( treeClick( "C_target/f12", Qt::LeftButton, Qt::ShiftModifier ) );
+
+    COMPARE_SELECTION( files( 10, 12 ) );
+    QCOMPARE( UpstreamRestrictedModeDialogCloser::closed(), 0 );
+}
+
+
+void TestSelection::shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly()
+{
+    // The same sequence with Shift already held during the treemap click.
+    // QAbstractItemView (Qt >= 6.8) skips its anchor re-sync while Shift is
+    // reported, so on upstream master this selects f01 .. f12 on every Qt
+    // version, again without an ancestor in the range and therefore without
+    // any warning.
+    CHECKED( treeClick( "C_target/f01", Qt::LeftButton ) );
+    COMPARE_SELECTION( files( 1, 1 ) );
+
+    CHECKED( treemapClick( "C_target/f10", Qt::ShiftModifier ) );
+    COMPARE_SELECTION( files( 10, 10 ) );
+    QCOMPARE( _tree->currentIndex().sibling( _tree->currentIndex().row(), 0 ), idx( "C_target/f10" ) );
+
+    CHECKED( treeClick( "C_target/f12", Qt::LeftButton, Qt::ShiftModifier ) );
+
+    COMPARE_SELECTION( files( 10, 12 ) );
+    QCOMPARE( UpstreamRestrictedModeDialogCloser::closed(), 0 );
+}
+
+
 //
 // Tests: stock behaviour that must be preserved
 //
@@ -1514,6 +1623,45 @@ void TestSelection::moveToTrash_yesMovesToTrash()
 
 
 //
+// Tests: no restricted mode (fix 5)
+//
+
+void TestSelection::ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted()
+{
+    // Selecting a directory and then, with Ctrl, an item inside it is an
+    // ordinary selection: cleanups and Move to Trash work on the normalized
+    // set (FileInfoSet::normalized() drops the child), and the confirmation
+    // dialog says that the selection is nested
+    // (confirmation_flagsNestedSelection). It must not be answered by taking
+    // multi-selection away for the rest of the program run.
+    //
+    // On upstream master since c0eefcf this opens a warning dialog, clears
+    // the selection and switches the tree to single selection until the
+    // program is restarted.
+    const int closedBefore = UpstreamRestrictedModeDialogCloser::closed();
+
+    CHECKED( treeClick( "C_target", Qt::LeftButton ) );
+    COMPARE_SELECTION( QStringList() << "C_target" );
+
+    CHECKED( treeClick( "C_target/f03", Qt::LeftButton, Qt::ControlModifier ) );
+    QTest::qWait( 100 );	// room for a modal dialog to open and be closed
+
+    COMPARE_SELECTION( sorted( QStringList() << "C_target" << "C_target/f03" ) );
+    QCOMPARE( UpstreamRestrictedModeDialogCloser::closed(), closedBefore );
+    QCOMPARE( _tree->selectionMode(), QAbstractItemView::ExtendedSelection );
+
+    // Multi-selection keeps working afterwards, in the tree ...
+    CHECKED( treeClick( "C_target/f05", Qt::LeftButton, Qt::ControlModifier ) );
+    COMPARE_SELECTION( sorted( QStringList() << "C_target" << "C_target/f03" << "C_target/f05" ) );
+
+    // ... and from the treemap: Ctrl+click on a tile adds it.
+    CHECKED( treemapClick( "C_target/f01", Qt::ControlModifier ) );
+    COMPARE_SELECTION( sorted( QStringList() << "C_target" << "C_target/f01" << "C_target/f03" << "C_target/f05" ) );
+    QCOMPARE( UpstreamRestrictedModeDialogCloser::closed(), closedBefore );
+}
+
+
+//
 // main
 //
 
@@ -1542,6 +1690,9 @@ int main( int argc, char * argv[] )
 
     TestSelection test;
     QTEST_SET_MAIN_SOURCE_PATH
+
+    // Only ever has something to do on upstream master (see the class).
+    UpstreamRestrictedModeDialogCloser upstreamDialogCloser;
 
     return QTest::qExec( &test, argc, argv );
 }
