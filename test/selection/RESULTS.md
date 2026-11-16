@@ -1,10 +1,267 @@
 # test/selection results
 
-Evidence that the Shift-anchor regression tests fail on upstream `master` and
+Evidence that the regression tests of the fixes fail on upstream `master` and
 pass on `safer`. Regenerate with the commands at the end; keep this file in
 sync when the matrix changes.
 
-## Matrix
+## Upstream `d7730f1` (restricted mode) and fix 5
+
+Upstream commits `c0eefcf` to `d7730f1` (2026-11-12 to 2026-11-14) add a
+"restricted mode": when an item and one of its ancestors are selected
+together, upstream shows a warning dialog, clears the selection and, until
+the program is restarted, allows single selection only and disables Move to
+Trash and the cleanups that run `rm -rf`. `safer` keeps that code but does
+not connect it (fix 5, `MainWindow::connectSignals()`).
+
+Everything in this section was run on 2026-11-16 with upstream `d7730f1` as
+`master` and `safer` with fixes 1 to 5. The sections after it are the earlier
+record against upstream `ed3478e` and are kept as they were.
+
+| Qt | platform | master (`d7730f1`), `evidence.sh` | safer (fixes 1 to 5) |
+|----|----------|-----------------------------------|----------------------|
+| 6.4.2 | Ubuntu 24.04, offscreen, distribution Qt | 30 tests, 0 unexpected | 32 passed, 0 failed |
+| 6.4.3 | Ubuntu 24.04, offscreen, Qt from the aqt mirror (the build CI installs) | 30 tests, 0 unexpected | 32 passed, 0 failed |
+| 6.8.3 | Ubuntu 24.04, offscreen, Qt from the aqt mirror (the build CI installs) | 30 tests, 0 unexpected | 32 passed, 0 failed |
+| 6.10.0 | Ubuntu 24.04, offscreen, Qt from the aqt mirror (the build CI installs) | 30 tests, 0 unexpected | 32 passed, 0 failed |
+| 6.12.0 | Ubuntu 24.04, offscreen, Qt from the aqt mirror (the build CI installs) | 30 tests, 0 unexpected | 32 passed, 0 failed |
+| 6.4.3, 6.8.3, 6.10.0, 6.12.0 | CI, ubuntu-24.04, aqt (`.github/workflows/ci.yml`) | on every push (job `evidence-on-master`), must report 0 unexpected | on every push (job `build-and-test`), must pass |
+
+There are 30 tests; "32 passed" counts `initTestCase()` and
+`cleanupTestCase()` as well. The test binary closes upstream's warning dialog
+itself (`UpstreamRestrictedModeDialogCloser`), so every test ends with a
+verdict on `master` too; `evidence.sh` limits each test process to 60
+seconds and counts a test without a result as unexpected.
+
+What the restricted mode changes on `master`, and what it does not:
+
+- The reproductions of the stale Shift anchor still fail. Where the
+  unintended range reaches up to the scan root, upstream now notices it
+  after the fact and clears it: the selection is empty where it was 16 rows
+  on `ed3478e`, and the tree is in single selection mode from then on.
+- Where the unintended range stays inside one directory, no ancestor is
+  involved and nothing is noticed.
+  `shiftClickAfterTreeAndTreemapClick_fromCurrentOnly` (click f01 in the
+  tree, click f10 in the treemap, Shift+click f12) selects f01 to f12 where
+  f10 to f12 was asked for, on Qt below 6.8;
+  `shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly` (the same with
+  Shift held during the treemap click) does so on every Qt version. No
+  warning opens in either case.
+- A Ctrl+click on a directory and then on a file inside it, an ordinary
+  selection so far, is answered with the warning, an empty selection and
+  single selection for the rest of the run
+  (`ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted`).
+- Six tests begin by selecting a directory together with an item inside it
+  (the scan root and `C_target/f01`, or `C_target` and one of its files):
+  `deleteCleanup_refusesToplevelInMultiSelection`,
+  `refreshThisCleanup_allowsToplevelAlone_refusesWithOthers`,
+  `noRefreshCleanup_allowsToplevelInMultiSelection`,
+  `moveToTrash_refusesToplevel`, `confirmation_flagsNestedSelection` and
+  `moveToTrash_enterDoesNotConfirm`. On `master` they now fail at that first
+  step, because the selection does not survive. Five of them failed on
+  `ed3478e` already, there for the missing fix;
+  `noRefreshCleanup_allowsToplevelInMultiSelection` was a control (PASS on
+  every tree) and is FAIL on `master` now. On `master` these six no longer
+  show what the fix changes, only that the selection cannot be made. The
+  tests on the scan root alone (`deleteCleanup_refusesToplevelAlone`,
+  `assumeDeletedCleanup_refusesToplevelAlone`) and the confirmation and Move
+  to Trash tests without a nested selection still fail there on the
+  behaviour itself.
+
+### master (`d7730f1`), Qt 6.4.2
+
+```
+test                                                       expected  result  verdict
+----                                                       --------  ------  -------
+shiftClickAfterTreemapClick_filesOnly                      FAIL<6.8  FAIL    ok
+shiftClickAfterTreemapClick_shiftHeldDuringTreemapClick    FAIL      FAIL    ok
+shiftDragAfterTreemapClick_filesOnly                       FAIL      FAIL    ok
+shiftClickOnIndentationAfterTreemapClick_filesOnly         FAIL<6.8  FAIL    ok
+shiftClickAfterProgrammaticCurrent_filesOnly               FAIL<6.8  FAIL    ok
+shiftClickAfterTreeAndTreemapClick_fromCurrentOnly         FAIL<6.8  FAIL    ok
+shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly    FAIL      FAIL    ok
+shiftDownRepeated_growsFromAnchor                          PASS      PASS    ok
+shiftDrag_growsAndShrinksFromAnchor                        PASS      PASS    ok
+ctrlClickThenShiftClick_keepsCommittedRange                PASS      PASS    ok
+shiftClickWithHiddenAnchor_isPlainClick                    FAIL      FAIL    ok
+shiftClickOnBranchIndicator_togglesExpansion               PASS      PASS    ok
+deleteCleanup_refusesToplevelInMultiSelection              FAIL      FAIL    ok
+deleteCleanup_refusesToplevelAlone                         FAIL      FAIL    ok
+assumeDeletedCleanup_refusesToplevelAlone                  FAIL      FAIL    ok
+refreshThisCleanup_allowsToplevelAlone_refusesWithOthers   FAIL      FAIL    ok
+noRefreshCleanup_allowsToplevelInMultiSelection            FAIL      FAIL    ok
+deleteCleanup_runsWithoutToplevel                          PASS      PASS    ok
+moveToTrash_refusesToplevel                                FAIL      FAIL    ok
+confirmation_listsAllDirectoriesAndDefaultsToNo            FAIL      FAIL    ok
+confirmation_enterDoesNotConfirm                           FAIL      FAIL    ok
+confirmation_filesAreCutWithACount                         FAIL      FAIL    ok
+confirmation_longDirectoryListGoesToDetails                FAIL      FAIL    ok
+confirmation_flagsNestedSelection                          FAIL      FAIL    ok
+confirmation_marksScanRoot                                 FAIL      FAIL    ok
+confirmation_yesRunsCleanup                                PASS      PASS    ok
+moveToTrash_asksForConfirmationAndDefaultsToNo             FAIL      FAIL    ok
+moveToTrash_enterDoesNotConfirm                            FAIL      FAIL    ok
+moveToTrash_yesMovesToTrash                                PASS      PASS    ok
+ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted    FAIL      FAIL    ok
+
+Qt 6.4.2: 30 tests, 0 unexpected
+```
+
+Failure detail for the rows discussed above, one process per test (very
+long lines cut):
+
+```
+FAIL!  : TestSelection::shiftClickAfterTreemapClick_filesOnly() 'actual_ == expected_' returned FALSE. (
+   selected: []
+   expected: [C_target/f01, C_target/f02, C_target/f03, C_target/f04, C_target/f05, C_target/f06, C_target/f07, C_target/f08, C_target/f09, C_target/f10, C_target/f11, C_target/f12])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(933)]
+FAIL!  : TestSelection::shiftClickAfterTreeAndTreemapClick_fromCurrentOnly() 'actual_ == expected_' returned FALSE. (
+   selected: [C_target/f01, C_target/f02, C_target/f03, C_target/f04, C_target/f05, C_target/f06, C_target/f07, C_target/f08, C_target/f09, C_target/f10, C_target/f11, C_target/f12]
+   expected: [C_target/f10, C_target/f11, C_target/f12])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(1033)]
+FAIL!  : TestSelection::shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly() 'actual_ == expected_' returned FALSE. (
+   selected: [C_target/f01, C_target/f02, C_target/f03, C_target/f04, C_target/f05, C_target/f06, C_target/f07, C_target/f08, C_target/f09, C_target/f10, C_target/f11, C_target/f12]
+   expected: [C_target/f10, C_target/f11, C_target/f12])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(1054)]
+FAIL!  : TestSelection::deleteCleanup_refusesToplevelInMultiSelection() 'actual_ == expected_' returned FALSE. (
+   selected: []
+   expected: [<scan root>, C_target/f01])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(897)]
+FAIL!  : TestSelection::deleteCleanup_refusesToplevelAlone() Compared values are not the same
+   Actual   (dialog.count()): 0
+   Expected (1)             : 1
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(1195)]
+FAIL!  : TestSelection::noRefreshCleanup_allowsToplevelInMultiSelection() 'actual_ == expected_' returned FALSE. (
+   selected: []
+   expected: [<scan root>, C_target/f01])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(897)]
+FAIL!  : TestSelection::ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted() 'actual_ == expected_' returned FALSE. (
+   selected: []
+   expected: [C_target, C_target/f03])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(1649)]
+```
+
+### master (`d7730f1`), Qt 6.12.0
+
+```
+test                                                       expected  result  verdict
+----                                                       --------  ------  -------
+shiftClickAfterTreemapClick_filesOnly                      FAIL<6.8  PASS    recorded
+shiftClickAfterTreemapClick_shiftHeldDuringTreemapClick    FAIL      FAIL    ok
+shiftDragAfterTreemapClick_filesOnly                       FAIL      FAIL    ok
+shiftClickOnIndentationAfterTreemapClick_filesOnly         FAIL<6.8  PASS    recorded
+shiftClickAfterProgrammaticCurrent_filesOnly               FAIL<6.8  PASS    recorded
+shiftClickAfterTreeAndTreemapClick_fromCurrentOnly         FAIL<6.8  PASS    recorded
+shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly    FAIL      FAIL    ok
+shiftDownRepeated_growsFromAnchor                          PASS      PASS    ok
+shiftDrag_growsAndShrinksFromAnchor                        PASS      PASS    ok
+ctrlClickThenShiftClick_keepsCommittedRange                PASS      PASS    ok
+shiftClickWithHiddenAnchor_isPlainClick                    FAIL      FAIL    ok
+shiftClickOnBranchIndicator_togglesExpansion               PASS      PASS    ok
+deleteCleanup_refusesToplevelInMultiSelection              FAIL      FAIL    ok
+deleteCleanup_refusesToplevelAlone                         FAIL      FAIL    ok
+assumeDeletedCleanup_refusesToplevelAlone                  FAIL      FAIL    ok
+refreshThisCleanup_allowsToplevelAlone_refusesWithOthers   FAIL      FAIL    ok
+noRefreshCleanup_allowsToplevelInMultiSelection            FAIL      FAIL    ok
+deleteCleanup_runsWithoutToplevel                          PASS      PASS    ok
+moveToTrash_refusesToplevel                                FAIL      FAIL    ok
+confirmation_listsAllDirectoriesAndDefaultsToNo            FAIL      FAIL    ok
+confirmation_enterDoesNotConfirm                           FAIL      FAIL    ok
+confirmation_filesAreCutWithACount                         FAIL      FAIL    ok
+confirmation_longDirectoryListGoesToDetails                FAIL      FAIL    ok
+confirmation_flagsNestedSelection                          FAIL      FAIL    ok
+confirmation_marksScanRoot                                 FAIL      FAIL    ok
+confirmation_yesRunsCleanup                                PASS      PASS    ok
+moveToTrash_asksForConfirmationAndDefaultsToNo             FAIL      FAIL    ok
+moveToTrash_enterDoesNotConfirm                            FAIL      FAIL    ok
+moveToTrash_yesMovesToTrash                                PASS      PASS    ok
+ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted    FAIL      FAIL    ok
+
+Qt 6.12.0: 30 tests, 0 unexpected
+```
+
+The plain-click reproductions pass here as before (anchor re-sync in Qt
+6.8 and later). The two that Qt's re-sync does not cover, with the range
+reaching the scan root (cleared by upstream) and with the range inside one
+directory (not noticed):
+
+```
+FAIL!  : TestSelection::shiftClickAfterTreemapClick_shiftHeldDuringTreemapClick() 'actual_ == expected_' returned FALSE. (
+   selected: []
+   expected: [C_target/f01, C_target/f02, C_target/f03, C_target/f04, C_target/f05, C_target/f06, C_target/f07, C_target/f08, C_target/f09, C_target/f10, C_target/f11, C_target/f12])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(948)]
+FAIL!  : TestSelection::shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly() 'actual_ == expected_' returned FALSE. (
+   selected: [C_target/f01, C_target/f02, C_target/f03, C_target/f04, C_target/f05, C_target/f06, C_target/f07, C_target/f08, C_target/f09, C_target/f10, C_target/f11, C_target/f12]
+   expected: [C_target/f10, C_target/f11, C_target/f12])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(1054)]
+FAIL!  : TestSelection::ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted() 'actual_ == expected_' returned FALSE. (
+   selected: []
+   expected: [C_target, C_target/f03])
+   Loc: [../../../x/ev/master/test/selection/test-selection.cpp(1649)]
+```
+
+Qt 6.4.3 gives the same table as 6.4.2, and Qt 6.8.3 and 6.10.0 the same
+as 6.12.0, each with 30 tests and 0 unexpected.
+
+### safer (fixes 1 to 5), Qt 6.4.2
+
+Full run. The offscreen platform plugin's repeated
+`QWARN: This plugin does not support propagateSizeHints()` lines are left out.
+
+```
+********* Start testing of TestSelection *********
+Config: Using QtTest library 6.4.2, Qt 6.4.2 (x86_64-little_endian-lp64 shared (dynamic) release build; by GCC 13.2.0), ubuntu 24.04
+PASS   : TestSelection::initTestCase()
+PASS   : TestSelection::shiftClickAfterTreemapClick_filesOnly()
+PASS   : TestSelection::shiftClickAfterTreemapClick_shiftHeldDuringTreemapClick()
+PASS   : TestSelection::shiftDragAfterTreemapClick_filesOnly()
+PASS   : TestSelection::shiftClickOnIndentationAfterTreemapClick_filesOnly()
+PASS   : TestSelection::shiftClickAfterProgrammaticCurrent_filesOnly()
+PASS   : TestSelection::shiftClickAfterTreeAndTreemapClick_fromCurrentOnly()
+PASS   : TestSelection::shiftClickAfterTreeAndShiftTreemapClick_fromCurrentOnly()
+PASS   : TestSelection::shiftDownRepeated_growsFromAnchor()
+PASS   : TestSelection::shiftDrag_growsAndShrinksFromAnchor()
+PASS   : TestSelection::ctrlClickThenShiftClick_keepsCommittedRange()
+PASS   : TestSelection::shiftClickWithHiddenAnchor_isPlainClick()
+PASS   : TestSelection::shiftClickOnBranchIndicator_togglesExpansion()
+PASS   : TestSelection::deleteCleanup_refusesToplevelInMultiSelection()
+PASS   : TestSelection::deleteCleanup_refusesToplevelAlone()
+PASS   : TestSelection::assumeDeletedCleanup_refusesToplevelAlone()
+PASS   : TestSelection::refreshThisCleanup_allowsToplevelAlone_refusesWithOthers()
+PASS   : TestSelection::noRefreshCleanup_allowsToplevelInMultiSelection()
+PASS   : TestSelection::deleteCleanup_runsWithoutToplevel()
+PASS   : TestSelection::moveToTrash_refusesToplevel()
+PASS   : TestSelection::confirmation_listsAllDirectoriesAndDefaultsToNo()
+PASS   : TestSelection::confirmation_enterDoesNotConfirm()
+PASS   : TestSelection::confirmation_filesAreCutWithACount()
+PASS   : TestSelection::confirmation_longDirectoryListGoesToDetails()
+PASS   : TestSelection::confirmation_flagsNestedSelection()
+PASS   : TestSelection::confirmation_marksScanRoot()
+PASS   : TestSelection::confirmation_yesRunsCleanup()
+PASS   : TestSelection::moveToTrash_asksForConfirmationAndDefaultsToNo()
+PASS   : TestSelection::moveToTrash_enterDoesNotConfirm()
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() confirmation dialogs shown: 1
+QINFO  : TestSelection::moveToTrash_yesMovesToTrash() f12 was in the trash at /root/.qttest/share/Trash
+PASS   : TestSelection::moveToTrash_yesMovesToTrash()
+PASS   : TestSelection::ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted()
+PASS   : TestSelection::cleanupTestCase()
+Totals: 32 passed, 0 failed, 0 skipped, 0 blacklisted, 5924ms
+********* Finished testing of TestSelection *********
+```
+
+Totals lines of the other builds:
+
+```
+Qt 6.4.3: Totals: 32 passed, 0 failed, 0 skipped, 0 blacklisted, 5774ms
+Qt 6.8.3: Totals: 32 passed, 0 failed, 0 skipped, 0 blacklisted, 5826ms
+Qt 6.10.0: Totals: 32 passed, 0 failed, 0 skipped, 0 blacklisted, 5948ms
+Qt 6.12.0: Totals: 32 passed, 0 failed, 0 skipped, 0 blacklisted, 5777ms
+```
+
+## Matrix before upstream's restricted mode (upstream `ed3478e`, fixes 1 to 4)
+
+From here to "How to regenerate": the record as it stood before upstream
+`c0eefcf`. `master` in these sections is upstream `ed3478e`, `safer` has
+fixes 1 to 4, and the suite had 27 tests ("29 passed").
 
 | Qt    | platform          | master                                   | safer      |
 |-------|-------------------|------------------------------------------|------------|

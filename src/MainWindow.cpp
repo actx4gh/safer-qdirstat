@@ -306,8 +306,25 @@ void MainWindow::connectSignals()
     connect( app()->selectionModel(),	  SIGNAL( currentItemChanged( FileInfo *, FileInfo * ) ),
 	     this,			  SLOT	( currentItemChanged( FileInfo *, FileInfo * ) ) );
 
-    connect( app()->selectionModel(),	  SIGNAL( dangerousSelection()       ),
-	     this,			  SLOT	( handleDangerousSelection() ) );
+    // safer-qdirstat: SelectionModel::dangerousSelection() is deliberately
+    // not connected to handleDangerousSelection() here.
+    //
+    // Upstream emits that signal whenever an item and one of its ancestors
+    // are selected together, and answers it with a warning dialog and a
+    // restricted mode for the rest of the program run. In this fork that
+    // situation is handled where it arises and where it matters instead:
+    // DirTreeView builds Shift ranges from its own anchor, so the unintended
+    // range is not selected in the first place; CleanupCollection and
+    // moveToTrash() refuse the scan root; and the confirmation dialog lists
+    // every directory and flags a selection that contains a directory
+    // together with items inside it. Selecting a directory and one of its
+    // children on purpose (Ctrl+click) is therefore a normal, harmless
+    // selection here, as it always was (FileInfoSet::normalized()).
+    //
+    // Upstream's code for the restricted mode is left in place and unused,
+    // so that the fork's whole difference from upstream in this matter is
+    // this one spot.
+    // See test/selection: ctrlClickDirectoryAndChild_staysSelectedAndUnrestricted.
 }
 
 
